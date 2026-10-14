@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=9">
+    <title>Servidor Descentralizado 🎮</title>
+    
+    <HTA:APPLICATION 
+        ID="MineApp" 
+        APPLICATIONNAME="PainelServidor" 
+        BORDER="thick" 
+        CAPTION="yes"
+        SYSMENU="yes"
+        MINIMIZEBUTTON="yes"
+        MAXIMIZEBUTTON="yes"
+        INNERBORDER="no"
+        SCROLL="no" 
+        SINGLEINSTANCE="yes" 
+        ICON="server.ico"
+        WINDOWSTATE="normal">
+        
+    <style>
+        html, body { 
+            background-color: #1e1e1e; color: #ffffff; 
+            font-family: 'Segoe UI', Tahoma, sans-serif; 
+            text-align: center; margin: 0; padding: 0;
+            width: 100%; height: 100%;
+            overflow: hidden; 
+        }
+
+        .container {
+            background-color: #2d2d2d; border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+            position: absolute;
+            top: 15px; bottom: 15px; left: 15px; right: 15px;
+            padding: 15px;
+            box-sizing: border-box;
+        }
+        
+        .btn { 
+            border: none; color: white; padding: 12px 5px; 
+            font-size: 13px; font-weight: bold; margin: 5px; 
+            cursor: pointer; border-radius: 6px; width: 46%;
+            box-sizing: border-box;
+        }
+        .btn-iniciar { background-color: #4CAF50; }
+        .btn-iniciar:hover { background-color: #45a049; }
+        
+        .btn-desligar { background-color: #f44336; }
+        .btn-desligar:hover { background-color: #da190b; }
+        
+        .btn-emergencia { background-color: #ff9800; }
+        .btn-emergencia:hover { background-color: #e68a00; }
+        
+        .btn-matar { background-color: #8b0000; }
+        .btn-matar:hover { background-color: #a52a2a; }
+        
+        .btn[disabled] { background-color: #555; color: #888; cursor: not-allowed; }
+        
+        .status-box { 
+            margin-bottom: 15px; padding: 10px; background-color: #0a0a0a; 
+            border-radius: 5px; font-size: 15px; border: 1px solid #222;
+        }
+        .online { color: #4CAF50; font-weight: bold; }
+        .offline { color: #f44336; font-weight: bold; }
+        .alerta { color: #ffeb3b; font-weight: bold; }
+        .pronto { color: #00e5ff; font-weight: bold; }
+        
+        .terminal {
+            position: absolute;
+            top: 175px; 
+            bottom: 15px;
+            left: 15px;
+            right: 15px;
+            background-color: #000; color: #0f0; font-family: Consolas, monospace;
+            font-size: 12px; text-align: left; padding: 10px;
+            overflow-y: auto; border-radius: 5px;
+            border: 1px solid #333;
+            scrollbar-face-color: #333; scrollbar-track-color: #111;
+            scrollbar-arrow-color: #888; scrollbar-shadow-color: #222;
+            scrollbar-darkshadow-color: #111;
+            box-sizing: border-box;
+        }
+    </style>
+
+    <script language="javascript">
+        window.resizeTo(580, 500); 
+        
+        var shell = new ActiveXObject("WScript.Shell");
+        var fso = new ActiveXObject("Scripting.FileSystemObject");
+        var logTimer = null;
+        var statusTimer = null;
+        var logFile = "console_log.txt";
+        var jaTocouSom = false; 
+        var emExecucao = false; 
+
+        function checarDocker() {
+            if (emExecucao) return; 
+
+            var tempFile = "docker_check.txt";
+            shell.Run("cmd.exe /c docker ps > " + tempFile + " 2>&1", 0, true);
+            
+            try {
+                if (fso.FileExists(tempFile)) {
+                    var arquivo = fso.OpenTextFile(tempFile, 1);
+                    var conteudo = !arquivo.AtEndOfStream ? arquivo.ReadAll() : "";
+                    arquivo.Close();
+                    
+                    var txtStatus = document.getElementById("statusTexto");
+                    var btnLigar = document.getElementById("btnLigar");
+                    var btnDesligar = document.getElementById("btnDesligar");
+                    var btnMatar = document.getElementById("btnMatar");
+                    
+                    if (conteudo.indexOf("mc_server") !== -1) {
+                        btnLigar.disabled = true;
+                        btnDesligar.disabled = false;
+                        btnMatar.disabled = false;
+                        
+                        var logServerFile = "server_ready.txt";
+                        shell.Run("cmd.exe /c docker logs --tail 15 mc_server > " + logServerFile + " 2>&1", 0, true);
+                        
+                        if (fso.FileExists(logServerFile)) {
+                            var arqLog = fso.OpenTextFile(logServerFile, 1);
+                            var logConteudo = !arqLog.AtEndOfStream ? arqLog.ReadAll() : "";
+                            arqLog.Close();
+                            
+                            if (logConteudo.indexOf("For help, type") !== -1) {
+                                txtStatus.innerHTML = "🎮 SERVIDOR PRONTO PARA JOGAR!";
+                                txtStatus.className = "pronto";
+                                
+                                if (!jaTocouSom) {
+                                    jaTocouSom = true;
+                                    shell.Run("powershell -c (New-Object Media.SoundPlayer 'C:\\Windows\\Media\\chimes.wav').PlaySync();", 0, false);
+                                }
+                            } else {
+                                txtStatus.innerHTML = "⏳ GERANDO MUNDO E PLUGINS...";
+                                txtStatus.className = "alerta";
+                            }
+                        }
+                    } 
+                    else if (conteudo.indexOf("error") !== -1 || conteudo.indexOf("daemon") !== -1) {
+                        txtStatus.innerHTML = "💤 DOCKER FECHADO - Pronto para iniciar";
+                        txtStatus.className = "alerta";
+                        btnLigar.disabled = false;
+                        btnDesligar.disabled = true;
+                        btnMatar.disabled = true;
+                        jaTocouSom = false; 
+                    } 
+                    else {
+                        txtStatus.innerHTML = "❌ OFFLINE - Imagens Pausadas";
+                        txtStatus.className = "offline";
+                        btnLigar.disabled = false;
+                        btnDesligar.disabled = true;
+                        btnMatar.disabled = true;
+                        jaTocouSom = false; 
+                    }
+                }
+            } catch (e) {}
+        }
+
+        function lerTerminal() {
+            try {
+                if (fso.FileExists(logFile)) {
+                    var arquivo = fso.OpenTextFile(logFile, 1, false);
+                    var conteudo = arquivo.ReadAll();
+                    arquivo.Close();
+                    
+                    var term = document.getElementById("telaTerminal");
+                    term.innerHTML = conteudo.replace(/\n/g, "<br>");
+                    term.scrollTop = term.scrollHeight; 
+
+                    if (emExecucao) {
+                        var txt = document.getElementById("statusTexto");
+                        txt.className = "alerta";
+                        
+                        if (conteudo.indexOf("CONTAINERS INICIADOS!") !== -1) {
+                            emExecucao = false; 
+                            checarDocker(); 
+                        } 
+                        else if (conteudo.indexOf("SINCRONIZACAO E BACKUP CONCLUIDOS!") !== -1 || conteudo.indexOf("SALVAMENTO FORCADO CONCLUIDO!") !== -1) {
+                            emExecucao = false;
+                            txt.innerHTML = "✔️ DADOS SALVOS NA NUVEM!";
+                            txt.className = "online";
+                            setTimeout(checarDocker, 2500); 
+                        }
+                        else if (conteudo.indexOf("SERVIDOR FECHADO! (Nenhum dado salvo)") !== -1) {
+                            emExecucao = false;
+                            txt.innerHTML = "❌ SERVIDOR DERRUBADO!";
+                            txt.className = "offline";
+                            setTimeout(checarDocker, 2500);
+                        }
+                        else if (conteudo.indexOf("[ERRO FATAL]") !== -1 || conteudo.indexOf("[ALERTA FATAL]") !== -1) {
+                            emExecucao = false;
+                            txt.innerHTML = "⚠️ PROCESSO ABORTADO POR SEGURANÇA!";
+                            txt.className = "offline";
+                            setTimeout(checarDocker, 2500);
+                        }
+                        else if (conteudo.indexOf("[6/6]") !== -1 || conteudo.indexOf("[3/3]") !== -1) { txt.innerHTML = "🔓 Removendo travas de segurança..."; }
+                        else if (conteudo.indexOf("Movendo o arquivo .zip") !== -1 || conteudo.indexOf("Movendo arquivo compactado") !== -1) { txt.innerHTML = "☁️ Enviando Backup para o Drive..."; }
+                        else if (conteudo.indexOf("[EXTRA]") !== -1) { txt.innerHTML = "📦 Compactando mundo em .zip..."; }
+                        else if (conteudo.indexOf("[5/6]") !== -1 || conteudo.indexOf("[2/3]") !== -1) { txt.innerHTML = "☁️ Exportando mapa para o Google Drive..."; }
+                        else if (conteudo.indexOf("Pausando os containers") !== -1 || conteudo.indexOf("Imagens ativas detectadas") !== -1) { txt.innerHTML = "🛑 Parando servidor Minecraft..."; }
+                        else if (conteudo.indexOf("[5/6] Subindo") !== -1 || conteudo.indexOf("[6/6] Subindo") !== -1) { txt.innerHTML = "🐳 Ligando infraestrutura Docker..."; }
+                        else if (conteudo.indexOf("Baixando a versao") !== -1) { txt.innerHTML = "☁️ Importando mundo do Google Drive..."; }
+                        else if (conteudo.indexOf("Trancando o acesso") !== -1) { txt.innerHTML = "🔒 Trancando acesso ao mapa..."; }
+                        else if (conteudo.indexOf("Verificando conflito") !== -1) { txt.innerHTML = "🛡️ Checando data do save na nuvem..."; }
+                        else if (conteudo.indexOf("Verificando se o servidor") !== -1) { txt.innerHTML = "🔎 Procurando trava na nuvem..."; }
+                        else if (conteudo.indexOf("[1/6]") !== -1) { txt.innerHTML = "⏳ Preparando motor do Docker..."; }
+                    }
+                }
+            } catch(e) {}
+        }
+
+        function rodarComando(scriptBat) {
+            try {
+                var file = fso.CreateTextFile(logFile, true);
+                file.WriteLine("Iniciando comando...");
+                file.Close();
+            } catch(e) { return; }
+
+            emExecucao = true; 
+
+            if(logTimer) clearInterval(logTimer);
+            logTimer = setInterval(lerTerminal, 500);
+
+            document.getElementById("btnLigar").disabled = true;
+            document.getElementById("btnDesligar").disabled = true;
+            document.getElementById("btnEmergencia").disabled = true;
+            document.getElementById("btnMatar").disabled = true;
+            
+            document.getElementById("statusTexto").innerHTML = "⏳ Inicializando scripts...";
+            document.getElementById("statusTexto").className = "alerta";
+
+            shell.Run("cmd.exe /c " + scriptBat + " > " + logFile + " 2>&1", 0, false);
+            setTimeout(function(){ 
+                document.getElementById("btnEmergencia").disabled = false; 
+            }, 10000);
+        }
+
+        function forcarSalvamento() {
+            var mensagem = "ATENÇÃO!\n\nUse este botão apenas se o PC crashou, se a janela foi fechada acidentalmente sem salvar, ou se o servidor travou.\n\nEle vai forçar o encerramento do Docker, gerar um backup ZIP e enviar os arquivos locais para o Google Drive.\n\nDeseja continuar?";
+            if (confirm(mensagem)) rodarComando('ForcarUpload.bat');
+        }
+
+        function forcarFechamento() {
+            var mensagem = "PERIGO!\n\nVocê vai desligar o servidor AGORA MESMO sem salvar NADA na nuvem.\n\nTodo o progresso feito desde que o servidor foi ligado será perdido, e apenas a trava será removida do Google Drive.\n\nTem certeza ABSOLUTA que deseja fazer isso?";
+            if (confirm(mensagem)) rodarComando('ForcarDesligamento.bat');
+        }
+
+        window.onload = function() {
+            checarDocker();
+            statusTimer = setInterval(checarDocker, 3000);
+        };
+    </script>
+</head>
+<body>
+
+    <div class="container">
+        
+        <div class="status-box">
+            Status: <span id="statusTexto">Checando Docker...</span>
+        </div>
+        
+        <div>
+            <button id="btnLigar" class="btn btn-iniciar" onclick="rodarComando('Ligar.bat')" disabled>▶ Iniciar Servidor</button>
+            <button id="btnDesligar" class="btn btn-desligar" onclick="rodarComando('Desligar.bat')" disabled>⏹ Parar e Salvar</button>
+        </div>
+        
+        <div>
+            <button id="btnEmergencia" class="btn btn-emergencia" onclick="forcarSalvamento()">⚠️ Salvar Emergência</button>
+            <button id="btnMatar" class="btn btn-matar" onclick="forcarFechamento()" disabled>☠️ Fechar Sem Salvar</button>
+        </div>
+
+        <div id="telaTerminal" class="terminal">
+            Aguardando comandos...
+        </div>
+    </div>
+    
+</body>
+</html>

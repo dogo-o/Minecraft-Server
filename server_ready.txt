@@ -1,0 +1,15 @@
+[02:50:57] [Server thread/INFO]: RCON running on 0.0.0.0:25575
+[02:50:57] [Server thread/INFO]: Saving chunks for level 'ServerLevel[dappled]'/minecraft:overworld
+[02:50:57] [Server thread/INFO]: Saving chunks for level 'ServerLevel[dappled]'/minecraft:the_end
+[02:50:57] [Server thread/INFO]: Saving chunks for level 'ServerLevel[dappled]'/minecraft:the_nether
+[02:51:49] [User Authenticator #1/INFO]: UUID of player molestadoCRAFT is 7b11fa65-0ae2-43bf-ba28-af38534759dc
+[02:51:50] [Server thread/INFO]: molestadoCRAFT[/172.18.0.1:50342] logged in with entity id 18 at (-4.451872901401521, 185.0, 398.54447354885747)
+[02:51:50] [Server thread/INFO]: System chat: molestadoCRAFT joined the game
+[02:51:53] [Server thread/INFO]: molestadoCRAFT lost connection: Disconnected
+[02:51:53] [Server thread/INFO]: System chat: molestadoCRAFT left the game
+[02:51:57] [User Authenticator #2/INFO]: UUID of player molestadoCRAFT is 7b11fa65-0ae2-43bf-ba28-af38534759dc
+[02:51:57] [Server thread/INFO]: molestadoCRAFT[/172.18.0.1:53756] logged in with entity id 167 at (-4.451872901401521, 185.0, 398.54447354885747)
+[02:51:57] [Server thread/INFO]: System chat: molestadoCRAFT joined the game
+[02:52:14] [Server thread/INFO]: Player molestadoCRAFT standing on air - force-sending blocks below
+[02:53:08] [Server thread/INFO]: Player molestadoCRAFT standing on air - force-sending blocks below
+[02:54:45] [Server thread/INFO]: Player molestadoCRAFT standing on air - force-sending blocks below

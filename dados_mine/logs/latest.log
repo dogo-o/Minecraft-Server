@@ -1,0 +1,34 @@
+[02:34:28] [ServerMain/INFO]: Environment: Environment[discoveryUrl=https://discovery.minecraftservices.com/minecraft/client, name=PROD]
+[02:34:31] [Worker-Main-8/INFO]: Loaded 1866 advancements
+[02:34:31] [Server thread/INFO]: Starting minecraft server version 26.3
+[02:34:31] [Server thread/INFO]: Loading properties
+[02:34:31] [Server thread/INFO]: Default game type: SURVIVAL
+[02:34:31] [Server thread/INFO]: Generating keypair
+[02:34:31] [Server thread/INFO]: Starting Minecraft server on *:25565
+[02:34:31] [Server thread/INFO]: Preparing level "world"
+[02:34:32] [Server thread/INFO]: Loading 0 persistent chunks...
+[02:34:32] [Server thread/INFO]: Preparing spawn area: 100%
+[02:34:32] [Server thread/INFO]: Time elapsed: 16 ms
+[02:34:32] [Server thread/INFO]: Done (0.757s)! For help, type "help"
+[02:34:32] [Server thread/INFO]: Starting remote control listener
+[02:34:32] [Server thread/INFO]: Thread RCON Listener started
+[02:34:32] [Server thread/INFO]: RCON running on 0.0.0.0:25575
+[02:34:32] [Server thread/INFO]: Saving chunks for level 'ServerLevel[dappled]'/minecraft:overworld
+[02:34:32] [Server thread/INFO]: Saving chunks for level 'ServerLevel[dappled]'/minecraft:the_end
+[02:34:32] [Server thread/INFO]: Saving chunks for level 'ServerLevel[dappled]'/minecraft:the_nether
+[02:35:50] [User Authenticator #1/INFO]: UUID of player molestadoCRAFT is 7b11fa65-0ae2-43bf-ba28-af38534759dc
+[02:35:51] [Server thread/INFO]: molestadoCRAFT[/172.18.0.1:44592] logged in with entity id 65 at (-151.55485982877119, 65.0, 33.285856578270945)
+[02:35:51] [Server thread/INFO]: System chat: molestadoCRAFT joined the game
+[02:36:36] [Server thread/INFO]: Player molestadoCRAFT standing on air - force-sending blocks below
+[02:36:50] [Server thread/INFO]: molestadoCRAFT lost connection: Disconnected
+[02:36:50] [Server thread/INFO]: System chat: molestadoCRAFT left the game
+[02:37:22] [RCON Listener #1/INFO]: Thread RCON Client /0:0:0:0:0:0:0:1 started
+[02:37:22] [Server thread/INFO]: System chat: [Rcon: Stopping the server]
+[02:37:22] [RCON Client /0:0:0:0:0:0:0:1 #2/INFO]: Thread RCON Client /0:0:0:0:0:0:0:1 shutting down
+[02:37:22] [Server thread/INFO]: Stopping server
+[02:37:22] [Server thread/INFO]: Saving players
+[02:37:22] [Server thread/INFO]: Saving worlds
+[02:37:22] [Server thread/INFO]: Saving chunks for level 'ServerLevel[dappled]'/minecraft:overworld
+[02:37:23] [Server thread/INFO]: Saving chunks for level 'ServerLevel[dappled]'/minecraft:the_end
+[02:37:23] [Server thread/INFO]: Saving chunks for level 'ServerLevel[dappled]'/minecraft:the_nether
+[02:37:23] [Server thread/INFO]: Thread RCON Listener stopped

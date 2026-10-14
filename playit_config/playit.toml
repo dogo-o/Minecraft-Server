@@ -1,0 +1,7 @@
+secret_key = "8a0cb2ca56b3c05ff495e24149a382e17fd07a7519435b551550e09cff418724"
+
+[[tunnels]]
+port_type = "tcp"
+local_ip = "mc_server"
+local_port = 25565
+protocol = "minecraft"

@@ -1,0 +1,42 @@
+services:
+  minecraft:
+    image: itzg/minecraft-server
+    container_name: mc_server
+    networks:
+      - rede_mine
+    ports:
+      - "25565:25565"
+    environment:
+      EULA: "TRUE"
+      TYPE: "VANILLA"
+      VERSION: "latest"
+      MEMORY: "4G"
+      ONLINE_MODE: "TRUE"
+    volumes:
+      - ./dados_mine:/data
+    restart: unless-stopped
+
+  playit:
+    image: alpine:latest
+    container_name: mc_playit
+    networks:
+      - rede_mine
+    depends_on:
+      - minecraft
+    command: >
+      sh -c "apk add --no-cache curl && 
+      curl -sL https://github.com/playit-cloud/playit-agent/releases/latest/download/playit-linux-amd64 -o /usr/local/bin/playit && 
+      chmod +x /usr/local/bin/playit && 
+      mkdir -p /etc/playit && 
+      echo 'secret_key = \"8a0cb2ca56b3c05ff495e24149a382e17fd07a7519435b551550e09cff418724\"' > /etc/playit/playit.toml && 
+      echo '[[tunnels]]' >> /etc/playit/playit.toml && 
+      echo 'port_type = \"tcp\"' >> /etc/playit/playit.toml && 
+      echo 'local_ip = \"mc_server\"' >> /etc/playit/playit.toml && 
+      echo 'local_port = 25565' >> /etc/playit/playit.toml && 
+      echo 'protocol = \"minecraft\"' >> /etc/playit/playit.toml && 
+      /usr/local/bin/playit"
+    restart: unless-stopped
+
+networks:
+  rede_mine:
+    driver: bridge
