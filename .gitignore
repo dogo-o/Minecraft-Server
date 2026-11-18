@@ -1,0 +1,6 @@
+Backups/*.zip
+rclone.conf.old*
+lock.txt
+selftest_report.txt
+playit_config/playit-linux-amd64
+.env
