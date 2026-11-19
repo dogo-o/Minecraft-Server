@@ -89,9 +89,14 @@ namespace MineSyncApp.UI
         private DataGridView _gridLocalBackups;
         private DataGridView _gridCloudBackups;
         private Button _btnCreateBackup;
+        private CheckBox _chkLocalBackupEnabled;
+        private Label _lblLocalBackupsDirInfo;
 
         // Config Tab Controls
         private TextBox _txtWorkspacePath;
+        private TextBox _txtBackupsDirConfig;
+        private CheckBox _chkLocalBackupConfig;
+        private bool _syncingBackupControls;
         private ComboBox _cbMemory;
         private ComboBox _cbServerType;
         private TextBox _txtServerVersion;
@@ -982,7 +987,7 @@ namespace MineSyncApp.UI
             root.Dock = DockStyle.Fill;
             root.ColumnCount = 1;
             root.RowCount = 2;
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 142f));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 176f));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
             CardPanel toolsCard = new CardPanel();
@@ -992,28 +997,29 @@ namespace MineSyncApp.UI
             TableLayoutPanel toolsLayout = new TableLayoutPanel();
             toolsLayout.Dock = DockStyle.Fill;
             toolsLayout.ColumnCount = 1;
-            toolsLayout.RowCount = 2;
+            toolsLayout.RowCount = 3;
             toolsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 54f));
+            toolsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48f));
             toolsLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
             FlowLayoutPanel toolsFlow = new FlowLayoutPanel();
             toolsFlow.Dock = DockStyle.Fill;
             toolsFlow.Margin = new Padding(0);
             toolsFlow.Padding = new Padding(0, 4, 0, 0);
-            toolsFlow.WrapContents = true;
+            toolsFlow.WrapContents = false;
 
             _btnCreateBackup = Theme.CreateButton("Criar Backup Agora (.zip)", Theme.EmeraldDark, Color.White);
-            _btnCreateBackup.Size = new Size(190, 36);
+            _btnCreateBackup.Size = new Size(186, 36);
             _btnCreateBackup.Margin = new Padding(0, 0, 8, 0);
             _btnCreateBackup.Click += async delegate { await CreateManualBackupAsync(); };
 
             Button btnReconnect = Theme.CreateButton("Reconectar Google Drive", Theme.BgElevated, Theme.Cyan);
-            btnReconnect.Size = new Size(180, 36);
+            btnReconnect.Size = new Size(176, 36);
             btnReconnect.Margin = new Padding(0, 0, 8, 0);
             btnReconnect.Click += delegate { _engine.OpenDriveReconnectWindow(); };
 
             Button btnUnlock = Theme.CreateButton("Forçar Remoção de Trava", Theme.Amber, Color.White);
-            btnUnlock.Size = new Size(190, 36);
+            btnUnlock.Size = new Size(186, 36);
             btnUnlock.Margin = new Padding(0, 0, 8, 0);
             btnUnlock.Click += async delegate
             {
@@ -1038,21 +1044,56 @@ namespace MineSyncApp.UI
                 }
             };
 
-            Button btnOpenFolder = Theme.CreateButton("Abrir Pasta Backups", Theme.BgElevated, Theme.TextPrimary);
-            btnOpenFolder.Size = new Size(150, 36);
+            Button btnOpenFolder = Theme.CreateButton("Abrir Pasta Local", Theme.BgElevated, Theme.TextPrimary);
+            btnOpenFolder.Size = new Size(140, 36);
+            btnOpenFolder.Margin = new Padding(0, 0, 8, 0);
             btnOpenFolder.Click += delegate
             {
-                Directory.CreateDirectory(_config.BackupsDir);
-                Process.Start("explorer.exe", _config.BackupsDir);
+                try
+                {
+                    Directory.CreateDirectory(_config.BackupsDir);
+                    Process.Start("explorer.exe", _config.BackupsDir);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Não foi possível abrir a pasta: " + ex.Message, "Pasta de Backups", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
             };
+
+            Button btnChangeBackupFolder = Theme.CreateButton("Mudar Pasta Local...", Theme.BgElevated, Theme.Emerald);
+            btnChangeBackupFolder.Size = new Size(154, 36);
+            btnChangeBackupFolder.Margin = new Padding(0);
+            btnChangeBackupFolder.Click += delegate { BrowseAndSetBackupsDir(); };
 
             toolsFlow.Controls.Add(_btnCreateBackup);
             toolsFlow.Controls.Add(btnReconnect);
             toolsFlow.Controls.Add(btnUnlock);
             toolsFlow.Controls.Add(btnOpenFolder);
+            toolsFlow.Controls.Add(btnChangeBackupFolder);
+
+            Panel toggleRow = new Panel();
+            toggleRow.Dock = DockStyle.Fill;
+            toggleRow.Margin = new Padding(0);
+
+            _chkLocalBackupEnabled = new CheckBox();
+            _chkLocalBackupEnabled.Text = "Salvar backup local (.zip) no HD ao parar servidor (o backup no Google Drive continua sempre ativo)";
+            _chkLocalBackupEnabled.UseMnemonic = false;
+            _chkLocalBackupEnabled.Checked = _config.LocalBackupEnabled;
+            _chkLocalBackupEnabled.Font = Theme.FontBold;
+            _chkLocalBackupEnabled.ForeColor = _config.LocalBackupEnabled ? Theme.Emerald : Theme.TextMuted;
+            _chkLocalBackupEnabled.AutoSize = true;
+            _chkLocalBackupEnabled.Location = new Point(2, 8);
+            _chkLocalBackupEnabled.CheckedChanged += delegate
+            {
+                if (_syncingBackupControls) return;
+                _config.SetBackupPreferences(_config.BackupsDir, _chkLocalBackupEnabled.Checked);
+                SyncBackupControlsFromConfig();
+            };
+            toggleRow.Controls.Add(_chkLocalBackupEnabled);
 
             toolsLayout.Controls.Add(Theme.CreateCardHeader("Ferramentas da Nuvem & Snapshots", "Manutenção de trava lock.txt, reconexão do Google Drive e backups .zip", null), 0, 0);
             toolsLayout.Controls.Add(toolsFlow, 0, 1);
+            toolsLayout.Controls.Add(toggleRow, 0, 2);
             toolsCard.Controls.Add(toolsLayout);
 
             TableLayoutPanel split = new TableLayoutPanel();
@@ -1106,7 +1147,17 @@ namespace MineSyncApp.UI
             localBtns.Controls.Add(btnDelBackup);
             localBtns.Controls.Add(btnRefreshBk);
 
-            localLayout.Controls.Add(Theme.CreateCardHeader("Backups Locais (Pasta Backups/)", "Restaure ou gerencie snapshots salvos neste PC", null), 0, 0);
+            Panel localHeader = Theme.CreateCardHeader("Backups Locais (HD)", "Pasta: " + _config.BackupsDir, null);
+            foreach (Control c in localHeader.Controls)
+            {
+                Panel stack = c as Panel;
+                if (stack != null && stack.Controls.Count > 1)
+                {
+                    _lblLocalBackupsDirInfo = stack.Controls[1] as Label;
+                }
+            }
+
+            localLayout.Controls.Add(localHeader, 0, 0);
             localLayout.Controls.Add(_gridLocalBackups, 0, 1);
             localLayout.Controls.Add(localBtns, 0, 2);
             localCard.Controls.Add(localLayout);
@@ -1217,6 +1268,47 @@ namespace MineSyncApp.UI
             wsPanel.Controls.Add(btnBrowseWs, 1, 0);
 
             AddFullWidthField(formGrid, "Pasta do Servidor:", wsPanel, ref row);
+
+            // Backups Folder row
+            _txtBackupsDirConfig = Theme.CreateTextBox(true);
+            _txtBackupsDirConfig.Dock = DockStyle.Fill;
+
+            Button btnBrowseBk = Theme.CreateButton("Alterar Pasta...", Theme.BgElevated, Theme.TextPrimary);
+            btnBrowseBk.Size = new Size(120, 28);
+            btnBrowseBk.Font = Theme.FontSmall;
+            btnBrowseBk.Click += delegate { BrowseAndSetBackupsDir(); };
+
+            TableLayoutPanel bkPanel = new TableLayoutPanel();
+            bkPanel.Dock = DockStyle.Fill;
+            bkPanel.Margin = new Padding(0);
+            bkPanel.Height = 32;
+            bkPanel.ColumnCount = 2;
+            bkPanel.RowCount = 1;
+            bkPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            bkPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 128f));
+            bkPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            btnBrowseBk.Dock = DockStyle.Fill;
+            btnBrowseBk.Margin = new Padding(6, 0, 0, 0);
+            _txtBackupsDirConfig.Margin = new Padding(0, 2, 0, 2);
+            bkPanel.Controls.Add(_txtBackupsDirConfig, 0, 0);
+            bkPanel.Controls.Add(btnBrowseBk, 1, 0);
+
+            AddFullWidthField(formGrid, "Pasta Backups Locais:", bkPanel, ref row);
+
+            _chkLocalBackupConfig = new CheckBox();
+            _chkLocalBackupConfig.Text = "Manter cópia .zip no HD local ao desligar (backup no Google Drive continua normal)";
+            _chkLocalBackupConfig.UseMnemonic = false;
+            _chkLocalBackupConfig.Checked = _config.LocalBackupEnabled;
+            _chkLocalBackupConfig.ForeColor = Theme.TextPrimary;
+            _chkLocalBackupConfig.AutoSize = true;
+            _chkLocalBackupConfig.CheckedChanged += delegate
+            {
+                if (_syncingBackupControls) return;
+                _config.SetBackupPreferences(_config.BackupsDir, _chkLocalBackupConfig.Checked);
+                SyncBackupControlsFromConfig();
+            };
+            AddFullWidthField(formGrid, "Backup Local (.zip):", _chkLocalBackupConfig, ref row);
+
             AddSectionRow(formGrid, "Recursos Docker & Túnel Playit.gg", ref row);
 
             _cbMemory = Theme.CreateComboBox();
@@ -1807,9 +1899,58 @@ namespace MineSyncApp.UI
             await RefreshBackupsTabAsync();
         }
 
+        private void BrowseAndSetBackupsDir()
+        {
+            using (FolderBrowserDialog fbd = new FolderBrowserDialog())
+            {
+                fbd.Description = "Selecione a pasta para salvar os backups locais (.zip)";
+                fbd.SelectedPath = _config.BackupsDir;
+                if (fbd.ShowDialog(this) == DialogResult.OK && !string.IsNullOrWhiteSpace(fbd.SelectedPath))
+                {
+                    _config.SetBackupPreferences(fbd.SelectedPath, _config.LocalBackupEnabled);
+                    SyncBackupControlsFromConfig();
+                    var _t = RefreshBackupsTabAsync();
+                }
+            }
+        }
+
+        private void SyncBackupControlsFromConfig()
+        {
+            _syncingBackupControls = true;
+            try
+            {
+                if (_chkLocalBackupEnabled != null)
+                {
+                    _chkLocalBackupEnabled.Checked = _config.LocalBackupEnabled;
+                    _chkLocalBackupEnabled.ForeColor = _config.LocalBackupEnabled ? Theme.Emerald : Theme.TextMuted;
+                }
+                if (_chkLocalBackupConfig != null)
+                {
+                    _chkLocalBackupConfig.Checked = _config.LocalBackupEnabled;
+                }
+                if (_txtBackupsDirConfig != null)
+                {
+                    _txtBackupsDirConfig.Text = _config.BackupsDir;
+                }
+                if (_lblLocalBackupsDirInfo != null)
+                {
+                    _lblLocalBackupsDirInfo.Text = string.Format(
+                        "Pasta: {0} • {1}",
+                        _config.BackupsDir,
+                        _config.LocalBackupEnabled ? "Backup local ATIVADO" : "Backup local DESATIVADO (apenas Drive)"
+                    );
+                }
+            }
+            finally
+            {
+                _syncingBackupControls = false;
+            }
+        }
+
         private void LoadConfigFields()
         {
             _txtWorkspacePath.Text = _config.WorkspaceDir;
+            SyncBackupControlsFromConfig();
             DockerSettings docker = _config.ReadDockerConfig();
             SelectOrAddCombo(_cbMemory, docker.Memory);
             SelectOrAddCombo(_cbServerType, docker.Type);
@@ -1837,6 +1978,9 @@ namespace MineSyncApp.UI
         {
             try
             {
+                _config.SetBackupPreferences(_txtBackupsDirConfig.Text, _chkLocalBackupConfig.Checked);
+                SyncBackupControlsFromConfig();
+
                 DockerSettings docker = new DockerSettings();
                 docker.Memory = Convert.ToString(_cbMemory.SelectedItem);
                 docker.Type = Convert.ToString(_cbServerType.SelectedItem);

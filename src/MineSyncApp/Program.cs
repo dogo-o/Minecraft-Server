@@ -98,6 +98,8 @@ namespace MineSyncApp
                 StringBuilder report = new StringBuilder();
                 report.AppendLine("SELF_TEST_OK");
                 report.AppendLine("Workspace=" + cfg.WorkspaceDir);
+                report.AppendLine("BackupsDir=" + cfg.BackupsDir);
+                report.AppendLine("LocalBackupEnabled=" + cfg.LocalBackupEnabled);
                 report.AppendLine("Docker=" + docker.Type + " " + docker.Version + " " + docker.Memory);
                 string motd = props.ContainsKey("motd") ? props["motd"] : "";
                 report.AppendLine("MOTD=" + motd);

@@ -476,17 +476,23 @@ namespace MineSyncApp.Core
             return list;
         }
 
-        public async Task<BackupEntry> CreateLocalBackupAsync(string prefix)
+        public Task<BackupEntry> CreateLocalBackupAsync(string prefix)
+        {
+            return CreateLocalBackupAsync(prefix, _config.BackupsDir);
+        }
+
+        public async Task<BackupEntry> CreateLocalBackupAsync(string prefix, string targetDirectory)
         {
             if (!Directory.Exists(_config.DadosMineDir))
             {
                 throw new DirectoryNotFoundException("Diretório dados_mine não encontrado para backup.");
             }
-            Directory.CreateDirectory(_config.BackupsDir);
+            string outDir = string.IsNullOrWhiteSpace(targetDirectory) ? _config.BackupsDir : targetDirectory;
+            Directory.CreateDirectory(outDir);
 
             string safePrefix = Regex.Replace(prefix ?? "Backup_Manual", @"[^a-zA-Z0-9_-]", "_");
             string fileName = string.Format("{0}_{1}.zip", safePrefix, DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss"));
-            string zipPath = Path.Combine(_config.BackupsDir, fileName);
+            string zipPath = Path.Combine(outDir, fileName);
 
             await Task.Run(delegate()
             {

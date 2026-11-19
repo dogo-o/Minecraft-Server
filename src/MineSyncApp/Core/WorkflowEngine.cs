@@ -709,12 +709,37 @@ namespace MineSyncApp.Core
                 }
 
                 Step(4, 6, "Compactando backup histórico (.zip)");
-                BackupEntry backup = await _backupService.CreateLocalBackupAsync("Backup_Mapa").ConfigureAwait(false);
-                Log(string.Format("Backup criado: {0} ({1})", backup.FileName, backup.SizeFormatted), "success");
+                bool keepLocalBackup = _config.LocalBackupEnabled;
+                string targetBackupDir = keepLocalBackup
+                    ? _config.BackupsDir
+                    : Path.Combine(Path.GetTempPath(), "MineSyncPro_TempBackup");
 
-                Step(5, 6, "Enviando backup compactado para a nuvem");
-                await RunRcloneAsync(string.Format("delete \"{0}/Backups/\" -v", cloudBase), 60000, true).ConfigureAwait(false);
-                await RunRcloneAsync(string.Format("copy \"{0}\" \"{1}/Backups/\" -v", backup.FullPath, cloudBase), 300000, true).ConfigureAwait(false);
+                if (!keepLocalBackup)
+                {
+                    Log("Backup local desativado: criando pacote temporário apenas para envio ao Google Drive...", "info");
+                }
+
+                BackupEntry backup = await _backupService.CreateLocalBackupAsync("Backup_Mapa", targetBackupDir).ConfigureAwait(false);
+                Log(string.Format("Pacote criado: {0} ({1})", backup.FileName, backup.SizeFormatted), "success");
+
+                try
+                {
+                    Step(5, 6, "Enviando backup compactado para a nuvem");
+                    await RunRcloneAsync(string.Format("delete \"{0}/Backups/\" -v", cloudBase), 60000, true).ConfigureAwait(false);
+                    await RunRcloneAsync(string.Format("copy \"{0}\" \"{1}/Backups/\" -v", backup.FullPath, cloudBase), 300000, true).ConfigureAwait(false);
+                }
+                finally
+                {
+                    if (!keepLocalBackup && File.Exists(backup.FullPath))
+                    {
+                        try
+                        {
+                            File.Delete(backup.FullPath);
+                            Log("Arquivo .zip temporário local removido (mantido apenas no Google Drive).", "info");
+                        }
+                        catch { }
+                    }
+                }
 
                 Step(6, 6, "Removendo trava de segurança");
                 await RunRcloneAsync(string.Format("delete \"{0}/lock.txt\"", cloudBase), 15000, true).ConfigureAwait(false);
@@ -759,11 +784,31 @@ namespace MineSyncApp.Core
                     throw new InvalidOperationException("Falha ao enviar dados para o Google Drive.");
                 }
 
-                BackupEntry backup = await _backupService.CreateLocalBackupAsync("Backup_Emergencia").ConfigureAwait(false);
+                bool keepLocalBackup = _config.LocalBackupEnabled;
+                string targetBackupDir = keepLocalBackup
+                    ? _config.BackupsDir
+                    : Path.Combine(Path.GetTempPath(), "MineSyncPro_TempBackup");
+
+                BackupEntry backup = await _backupService.CreateLocalBackupAsync("Backup_Emergencia", targetBackupDir).ConfigureAwait(false);
                 Log(string.Format("Backup de emergência criado: {0} ({1})", backup.FileName, backup.SizeFormatted), "success");
 
-                await RunRcloneAsync(string.Format("delete \"{0}/Backups/\" -v", cloudBase), 60000, true).ConfigureAwait(false);
-                await RunRcloneAsync(string.Format("copy \"{0}\" \"{1}/Backups/\" -v", backup.FullPath, cloudBase), 300000, true).ConfigureAwait(false);
+                try
+                {
+                    await RunRcloneAsync(string.Format("delete \"{0}/Backups/\" -v", cloudBase), 60000, true).ConfigureAwait(false);
+                    await RunRcloneAsync(string.Format("copy \"{0}\" \"{1}/Backups/\" -v", backup.FullPath, cloudBase), 300000, true).ConfigureAwait(false);
+                }
+                finally
+                {
+                    if (!keepLocalBackup && File.Exists(backup.FullPath))
+                    {
+                        try
+                        {
+                            File.Delete(backup.FullPath);
+                            Log("Arquivo .zip temporário local removido (mantido apenas no Google Drive).", "info");
+                        }
+                        catch { }
+                    }
+                }
 
                 Step(4, 4, "Removendo travas de segurança");
                 await RunRcloneAsync(string.Format("delete \"{0}/lock.txt\"", cloudBase), 15000, true).ConfigureAwait(false);

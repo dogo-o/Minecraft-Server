@@ -47,10 +47,16 @@ namespace MineSyncApp.Core
             get { return Path.Combine(AppDataConfigDir, "workspace.txt"); }
         }
 
+        public static string BackupSettingsFile
+        {
+            get { return Path.Combine(AppDataConfigDir, "backup_settings.txt"); }
+        }
+
         public string DadosMineDir { get { return Path.Combine(WorkspaceDir, "dados_mine"); } }
         public string WorldDir { get { return Path.Combine(DadosMineDir, "world"); } }
         public string LevelDatFile { get { return Path.Combine(WorldDir, "level.dat"); } }
-        public string BackupsDir { get { return Path.Combine(WorkspaceDir, "Backups"); } }
+        public string BackupsDir { get; private set; }
+        public bool LocalBackupEnabled { get; private set; }
         public string PlayitTomlFile { get { return Path.Combine(WorkspaceDir, "playit_config", "playit.toml"); } }
         public string RcloneExe { get { return Path.Combine(WorkspaceDir, "rclone.exe"); } }
         public string RcloneConf { get { return Path.Combine(WorkspaceDir, "rclone.conf"); } }
@@ -62,6 +68,76 @@ namespace MineSyncApp.Core
         public ServerConfig()
         {
             WorkspaceDir = DiscoverWorkspaceDir();
+            LoadBackupPreferences();
+        }
+
+        public static string GetDefaultBackupsDir(string workspaceDir)
+        {
+            try
+            {
+                if (Directory.Exists(@"E:\"))
+                {
+                    return @"E:\BACKUPS SERVER MINE";
+                }
+            }
+            catch
+            {
+            }
+            return Path.Combine(workspaceDir, "Backups");
+        }
+
+        private void LoadBackupPreferences()
+        {
+            BackupsDir = GetDefaultBackupsDir(WorkspaceDir);
+            LocalBackupEnabled = true;
+
+            try
+            {
+                if (File.Exists(BackupSettingsFile))
+                {
+                    foreach (string line in File.ReadAllLines(BackupSettingsFile, Encoding.UTF8))
+                    {
+                        int eq = line.IndexOf('=');
+                        if (eq <= 0) continue;
+                        string key = line.Substring(0, eq).Trim().ToUpperInvariant();
+                        string val = line.Substring(eq + 1).Trim();
+                        if (key == "BACKUPS_DIR" && !string.IsNullOrEmpty(val))
+                        {
+                            BackupsDir = val;
+                        }
+                        else if (key == "LOCAL_BACKUP_ENABLED")
+                        {
+                            LocalBackupEnabled = !string.Equals(val, "false", StringComparison.OrdinalIgnoreCase) && val != "0";
+                        }
+                    }
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        public void SetBackupPreferences(string backupsDir, bool localBackupEnabled)
+        {
+            if (!string.IsNullOrWhiteSpace(backupsDir))
+            {
+                BackupsDir = Path.GetFullPath(backupsDir.Trim());
+            }
+            LocalBackupEnabled = localBackupEnabled;
+
+            try
+            {
+                Directory.CreateDirectory(AppDataConfigDir);
+                string content = string.Format(
+                    "BACKUPS_DIR={0}\r\nLOCAL_BACKUP_ENABLED={1}\r\n",
+                    BackupsDir,
+                    LocalBackupEnabled ? "true" : "false"
+                );
+                File.WriteAllText(BackupSettingsFile, content, Encoding.UTF8);
+            }
+            catch
+            {
+            }
         }
 
         public static bool IsValidWorkspace(string dir)
