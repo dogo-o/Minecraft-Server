@@ -6,6 +6,93 @@ using MineSyncApp.Core;
 
 namespace MineSyncApp.UI
 {
+    public class CardPanel : Panel
+    {
+        public CardPanel()
+        {
+            this.DoubleBuffered = true;
+            this.ResizeRedraw = true;
+            this.BackColor = Theme.BgCard;
+            this.Padding = new Padding(14);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            Rectangle rect = new Rectangle(0, 0, Math.Max(1, this.Width - 1), Math.Max(1, this.Height - 1));
+            using (Pen p = new Pen(Theme.Border, 1))
+            {
+                e.Graphics.DrawRectangle(p, rect);
+            }
+        }
+    }
+
+    public class StyledButton : Button
+    {
+        public Color ActiveBackColor { get; set; }
+        public Color ActiveForeColor { get; set; }
+
+        private static readonly Color DisabledBackColor = Color.FromArgb(22, 29, 41);
+        private static readonly Color DisabledBorderColor = Color.FromArgb(35, 46, 62);
+        private static readonly Color DisabledForeColor = Color.FromArgb(78, 92, 112);
+
+        public StyledButton(Color activeBackColor, Color activeForeColor)
+        {
+            ActiveBackColor = activeBackColor;
+            ActiveForeColor = activeForeColor;
+            ApplyStateColors();
+        }
+
+        private void ApplyStateColors()
+        {
+            if (this.Enabled)
+            {
+                this.BackColor = ActiveBackColor;
+                this.ForeColor = ActiveForeColor;
+                this.FlatAppearance.BorderColor = ControlPaint.Light(ActiveBackColor, 0.25f);
+            }
+            else
+            {
+                this.BackColor = DisabledBackColor;
+                this.ForeColor = DisabledForeColor;
+                this.FlatAppearance.BorderColor = DisabledBorderColor;
+            }
+        }
+
+        protected override void OnEnabledChanged(EventArgs e)
+        {
+            base.OnEnabledChanged(e);
+            ApplyStateColors();
+            this.Invalidate();
+        }
+
+        protected override void OnPaint(PaintEventArgs pevent)
+        {
+            if (!this.Enabled)
+            {
+                using (SolidBrush bg = new SolidBrush(DisabledBackColor))
+                {
+                    pevent.Graphics.FillRectangle(bg, this.ClientRectangle);
+                }
+                Rectangle borderRect = new Rectangle(0, 0, Math.Max(1, this.Width - 1), Math.Max(1, this.Height - 1));
+                using (Pen borderPen = new Pen(DisabledBorderColor, 1))
+                {
+                    pevent.Graphics.DrawRectangle(borderPen, borderRect);
+                }
+                TextRenderer.DrawText(
+                    pevent.Graphics,
+                    this.Text,
+                    this.Font,
+                    this.ClientRectangle,
+                    DisabledForeColor,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis
+                );
+                return;
+            }
+            base.OnPaint(pevent);
+        }
+    }
+
     public static class Theme
     {
         public static readonly Color BgBase = Color.FromArgb(11, 15, 23);
@@ -28,13 +115,17 @@ namespace MineSyncApp.UI
 
         public static readonly Font FontBase = new Font("Segoe UI", 9.5f, FontStyle.Regular);
         public static readonly Font FontBold = new Font("Segoe UI", 9.5f, FontStyle.Bold);
-        public static readonly Font FontTitle = new Font("Segoe UI", 12.5f, FontStyle.Bold);
-        public static readonly Font FontHero = new Font("Segoe UI", 14f, FontStyle.Bold);
+        public static readonly Font FontTitle = new Font("Segoe UI", 12f, FontStyle.Bold);
         public static readonly Font FontSmall = new Font("Segoe UI", 8.5f, FontStyle.Regular);
         public static readonly Font FontMono = new Font("Consolas", 9.5f, FontStyle.Regular);
 
         [DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, string lParam);
+
+        private const int EmSetCueBanner = 0x1501;
 
         public static void ApplyDarkTitleBar(Form form)
         {
@@ -51,46 +142,81 @@ namespace MineSyncApp.UI
             }
         }
 
-        public static Panel CreateCard(string title, string subtitle)
+        public static void SetPlaceholder(TextBox tb, string placeholder)
         {
-            Panel card = new Panel();
-            card.BackColor = BgCard;
-            card.Padding = new Padding(14);
-            card.Paint += delegate(object sender, PaintEventArgs e)
+            try
             {
-                ControlPaint.DrawBorder(e.Graphics, card.ClientRectangle, Border, ButtonBorderStyle.Solid);
-            };
-
-            if (!string.IsNullOrEmpty(title))
-            {
-                Label lblTitle = new Label();
-                lblTitle.Text = title;
-                lblTitle.Font = FontTitle;
-                lblTitle.ForeColor = TextPrimary;
-                lblTitle.AutoSize = true;
-                lblTitle.Location = new Point(14, 12);
-                card.Controls.Add(lblTitle);
-
-                if (!string.IsNullOrEmpty(subtitle))
+                if (tb.IsHandleCreated)
                 {
-                    Label lblSub = new Label();
-                    lblSub.Text = subtitle;
-                    lblSub.Font = FontSmall;
-                    lblSub.ForeColor = TextMuted;
-                    lblSub.AutoSize = true;
-                    lblSub.Location = new Point(14, 36);
-                    card.Controls.Add(lblSub);
+                    SendMessage(tb.Handle, EmSetCueBanner, (IntPtr)1, placeholder ?? "");
+                }
+                else
+                {
+                    tb.HandleCreated += delegate
+                    {
+                        SendMessage(tb.Handle, EmSetCueBanner, (IntPtr)1, placeholder ?? "");
+                    };
                 }
             }
-            return card;
+            catch
+            {
+            }
+        }
+
+        public static Panel CreateCardHeader(string title, string subtitle, Control rightControl)
+        {
+            TableLayoutPanel header = new TableLayoutPanel();
+            header.Dock = DockStyle.Top;
+            header.Height = string.IsNullOrEmpty(subtitle) ? 34 : 50;
+            header.ColumnCount = 2;
+            header.RowCount = 1;
+            header.Margin = new Padding(0);
+            header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            header.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+
+            Panel textStack = new Panel();
+            textStack.Size = new Size(100, 44);
+            textStack.Margin = new Padding(0);
+            textStack.Dock = DockStyle.Fill;
+
+            Label lblTitle = new Label();
+            lblTitle.Text = title;
+            lblTitle.UseMnemonic = false;
+            lblTitle.Font = FontTitle;
+            lblTitle.ForeColor = TextPrimary;
+            lblTitle.AutoSize = true;
+            lblTitle.Location = new Point(0, 0);
+            textStack.Controls.Add(lblTitle);
+
+            if (!string.IsNullOrEmpty(subtitle))
+            {
+                Label lblSub = new Label();
+                lblSub.Text = subtitle;
+                lblSub.UseMnemonic = false;
+                lblSub.Font = FontSmall;
+                lblSub.ForeColor = TextMuted;
+                lblSub.AutoSize = true;
+                lblSub.Location = new Point(0, 23);
+                textStack.Controls.Add(lblSub);
+            }
+
+            header.Controls.Add(textStack, 0, 0);
+            if (rightControl != null)
+            {
+                rightControl.Margin = new Padding(0);
+                rightControl.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+                header.Controls.Add(rightControl, 1, 0);
+            }
+
+            return header;
         }
 
         public static Button CreateButton(string text, Color backColor, Color foreColor)
         {
-            Button btn = new Button();
+            StyledButton btn = new StyledButton(backColor, foreColor);
             btn.Text = text;
-            btn.BackColor = backColor;
-            btn.ForeColor = foreColor;
+            btn.UseMnemonic = false;
             btn.Font = FontBold;
             btn.FlatStyle = FlatStyle.Flat;
             btn.FlatAppearance.BorderSize = 1;
@@ -120,6 +246,17 @@ namespace MineSyncApp.UI
             cb.DropDownStyle = ComboBoxStyle.DropDownList;
             cb.Font = FontBase;
             return cb;
+        }
+
+        public static Label CreateLabel(string text, Font font, Color color)
+        {
+            Label lbl = new Label();
+            lbl.Text = text;
+            lbl.UseMnemonic = false;
+            lbl.Font = font ?? FontBase;
+            lbl.ForeColor = color;
+            lbl.AutoSize = true;
+            return lbl;
         }
 
         public static void StyleDataGrid(DataGridView grid)
@@ -172,21 +309,16 @@ namespace MineSyncApp.UI
 
             Theme.ApplyDarkTitleBar(this);
 
-            Label lblTitle = new Label();
-            lblTitle.Text = "Os saves Local e da Nuvem estão diferentes!";
-            lblTitle.Font = Theme.FontTitle;
-            lblTitle.ForeColor = Color.FromArgb(251, 191, 36);
-            lblTitle.AutoSize = true;
+            Label lblTitle = Theme.CreateLabel("Os saves Local e da Nuvem estão diferentes!", Theme.FontTitle, Color.FromArgb(251, 191, 36));
             lblTitle.Location = new Point(20, 18);
             this.Controls.Add(lblTitle);
 
-            Label lblDesc = new Label();
-            lblDesc.Text = string.Format(
-                "Diferença detectada de {0} minutos em world/level.dat. Escolha qual save você deseja carregar:",
-                cloud.DiffMinutes
+            Label lblDesc = Theme.CreateLabel(
+                string.Format("Diferença detectada de {0} minutos em world/level.dat. Escolha qual save você deseja carregar:", cloud.DiffMinutes),
+                Theme.FontBase,
+                Theme.TextMuted
             );
-            lblDesc.Font = Theme.FontBase;
-            lblDesc.ForeColor = Theme.TextMuted;
+            lblDesc.AutoSize = false;
             lblDesc.Size = new Size(505, 40);
             lblDesc.Location = new Point(20, 48);
             this.Controls.Add(lblDesc);
@@ -246,34 +378,18 @@ namespace MineSyncApp.UI
 
         private static Panel BuildBox(string title, string dateStr, string tag, Color tagColor, Point loc)
         {
-            Panel box = new Panel();
-            box.BackColor = Theme.BgCard;
+            CardPanel box = new CardPanel();
+            box.Padding = new Padding(10);
             box.Size = new Size(243, 96);
             box.Location = loc;
-            box.Paint += delegate(object s, PaintEventArgs e)
-            {
-                ControlPaint.DrawBorder(e.Graphics, box.ClientRectangle, Theme.Border, ButtonBorderStyle.Solid);
-            };
 
-            Label t = new Label();
-            t.Text = title;
-            t.Font = Theme.FontBold;
-            t.ForeColor = Theme.TextPrimary;
-            t.AutoSize = true;
+            Label t = Theme.CreateLabel(title, Theme.FontBold, Theme.TextPrimary);
             t.Location = new Point(12, 12);
 
-            Label d = new Label();
-            d.Text = dateStr;
-            d.Font = Theme.FontBase;
-            d.ForeColor = Theme.TextMuted;
-            d.AutoSize = true;
+            Label d = Theme.CreateLabel(dateStr, Theme.FontBase, Theme.TextMuted);
             d.Location = new Point(12, 36);
 
-            Label b = new Label();
-            b.Text = tag;
-            b.Font = Theme.FontBold;
-            b.ForeColor = tagColor;
-            b.AutoSize = true;
+            Label b = Theme.CreateLabel(tag, Theme.FontBold, tagColor);
             b.Location = new Point(12, 64);
 
             box.Controls.Add(t);

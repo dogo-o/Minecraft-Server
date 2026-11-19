@@ -1,4 +1,5 @@
 Backups/*.zip
+MineSync.exe
 rclone.conf.old*
 lock.txt
 selftest_report.txt

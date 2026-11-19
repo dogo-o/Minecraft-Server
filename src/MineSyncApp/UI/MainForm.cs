@@ -22,12 +22,19 @@ namespace MineSyncApp.UI
         private bool _soundEnabled = true;
         private bool _alreadyPlayedReadySound;
         private bool _isRefreshingStatus;
+        private bool _allowExit;
+        private bool _shownTrayBalloon;
         private string _activeTab = "dashboard";
         private string _currentPlayitAddress = "";
 
         private DockerStatusInfo _lastDocker = new DockerStatusInfo();
         private CloudStatusInfo _lastCloud = new CloudStatusInfo();
         private List<PlayerInfo> _cachedPlayers = new List<PlayerInfo>();
+
+        // System Tray
+        private NotifyIcon _trayIcon;
+        private ToolStripMenuItem _trayMenuStart;
+        private ToolStripMenuItem _trayMenuStop;
 
         // Sidebar & Header Controls
         private Panel _sidebarPanel;
@@ -112,6 +119,7 @@ namespace MineSyncApp.UI
             _engine.OnProgress += Engine_OnProgress;
 
             InitializeWindow();
+            InitializeTray();
             BuildLayout();
             LoadConfigFields();
             SwitchTab("dashboard");
@@ -132,7 +140,7 @@ namespace MineSyncApp.UI
         {
             this.Text = "MineSync Pro — Gerenciador de Servidor Minecraft";
             this.Size = new Size(1220, 800);
-            this.MinimumSize = new Size(1040, 700);
+            this.MinimumSize = new Size(1020, 680);
             this.StartPosition = FormStartPosition.CenterScreen;
             this.BackColor = Theme.BgBase;
             this.ForeColor = Theme.TextPrimary;
@@ -161,28 +169,133 @@ namespace MineSyncApp.UI
             Theme.ApplyDarkTitleBar(this);
         }
 
+        private void InitializeTray()
+        {
+            ContextMenuStrip trayMenu = new ContextMenuStrip();
+
+            ToolStripMenuItem openItem = new ToolStripMenuItem("Abrir MineSync Pro");
+            openItem.Font = new Font(trayMenu.Font, FontStyle.Bold);
+            openItem.Click += delegate { RestoreFromTray(); };
+
+            _trayMenuStart = new ToolStripMenuItem("Iniciar Servidor");
+            _trayMenuStart.Click += async delegate
+            {
+                RestoreFromTray();
+                await RunStartWorkflowAsync();
+            };
+
+            _trayMenuStop = new ToolStripMenuItem("Parar e Salvar");
+            _trayMenuStop.Enabled = false;
+            _trayMenuStop.Click += async delegate
+            {
+                RestoreFromTray();
+                await RunWorkflowWithHandling(_engine.StopAndSaveServerAsync());
+            };
+
+            ToolStripMenuItem exitItem = new ToolStripMenuItem("Sair Completamente");
+            exitItem.Click += delegate { ExitApplication(); };
+
+            trayMenu.Items.Add(openItem);
+            trayMenu.Items.Add(new ToolStripSeparator());
+            trayMenu.Items.Add(_trayMenuStart);
+            trayMenu.Items.Add(_trayMenuStop);
+            trayMenu.Items.Add(new ToolStripSeparator());
+            trayMenu.Items.Add(exitItem);
+
+            _trayIcon = new NotifyIcon();
+            _trayIcon.Icon = this.Icon ?? SystemIcons.Application;
+            _trayIcon.Text = "MineSync Pro — Servidor Minecraft";
+            _trayIcon.ContextMenuStrip = trayMenu;
+            _trayIcon.Visible = true;
+            _trayIcon.MouseClick += delegate(object s, MouseEventArgs e)
+            {
+                if (e.Button == MouseButtons.Left)
+                {
+                    RestoreFromTray();
+                }
+            };
+            _trayIcon.DoubleClick += delegate { RestoreFromTray(); };
+        }
+
+        private void RestoreFromTray()
+        {
+            this.Show();
+            this.ShowInTaskbar = true;
+            if (this.WindowState == FormWindowState.Minimized)
+            {
+                this.WindowState = FormWindowState.Normal;
+            }
+            this.Activate();
+            this.BringToFront();
+        }
+
+        private void ExitApplication()
+        {
+            if (_engine.IsBusy)
+            {
+                DialogResult res = MessageBox.Show(
+                    "Existe uma sincronização ou operação em andamento. Deseja realmente fechar o MineSync Pro?",
+                    "Operação em Andamento",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning
+                );
+                if (res != DialogResult.Yes) return;
+            }
+            _allowExit = true;
+            this.Close();
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            if (e.CloseReason == CloseReason.UserClosing && !_allowExit)
+            {
+                e.Cancel = true;
+                this.Hide();
+                this.ShowInTaskbar = false;
+                if (!_shownTrayBalloon && _trayIcon != null)
+                {
+                    _shownTrayBalloon = true;
+                    _trayIcon.ShowBalloonTip(
+                        3000,
+                        "MineSync Pro",
+                        "O painel foi minimizado na bandeja do sistema (flechinha ^ perto do relógio).",
+                        ToolTipIcon.Info
+                    );
+                }
+                return;
+            }
+            base.OnFormClosing(e);
+        }
+
+        protected override void OnFormClosed(FormClosedEventArgs e)
+        {
+            if (_pollTimer != null)
+            {
+                _pollTimer.Stop();
+                _pollTimer.Dispose();
+            }
+            if (_trayIcon != null)
+            {
+                _trayIcon.Visible = false;
+                _trayIcon.Dispose();
+            }
+            base.OnFormClosed(e);
+        }
+
         private void BuildLayout()
         {
             // Sidebar
             _sidebarPanel = new Panel();
             _sidebarPanel.Dock = DockStyle.Left;
-            _sidebarPanel.Width = 225;
+            _sidebarPanel.Width = 220;
             _sidebarPanel.BackColor = Theme.BgSidebar;
             _sidebarPanel.Padding = new Padding(12);
 
-            Label lblBrand = new Label();
-            lblBrand.Text = "MineSync PRO";
-            lblBrand.Font = new Font("Segoe UI", 15f, FontStyle.Bold);
-            lblBrand.ForeColor = Theme.Emerald;
+            Label lblBrand = Theme.CreateLabel("MineSync PRO", new Font("Segoe UI", 15f, FontStyle.Bold), Theme.Emerald);
             lblBrand.Location = new Point(14, 16);
-            lblBrand.AutoSize = true;
 
-            Label lblBrandSub = new Label();
-            lblBrandSub.Text = "Servidor Descentralizado";
-            lblBrandSub.Font = Theme.FontSmall;
-            lblBrandSub.ForeColor = Theme.TextMuted;
+            Label lblBrandSub = Theme.CreateLabel("Servidor Descentralizado", Theme.FontSmall, Theme.TextMuted);
             lblBrandSub.Location = new Point(15, 43);
-            lblBrandSub.AutoSize = true;
 
             _sidebarPanel.Controls.Add(lblBrand);
             _sidebarPanel.Controls.Add(lblBrandSub);
@@ -193,93 +306,75 @@ namespace MineSyncApp.UI
             AddNavButton("backups", "Backups & Nuvem", 214);
             AddNavButton("config", "Configurações", 258);
 
-            // Sidebar footer info
+            // Sidebar footer
             Panel sideFooter = new Panel();
             sideFooter.Dock = DockStyle.Bottom;
-            sideFooter.Height = 96;
+            sideFooter.Height = 132;
             sideFooter.BackColor = Theme.BgSidebar;
 
-            _lblDockerSide = new Label();
-            _lblDockerSide.Text = "Docker: Verificando...";
-            _lblDockerSide.Font = Theme.FontSmall;
-            _lblDockerSide.ForeColor = Theme.TextMuted;
-            _lblDockerSide.Location = new Point(6, 12);
-            _lblDockerSide.AutoSize = true;
+            _lblDockerSide = Theme.CreateLabel("Docker: Verificando...", Theme.FontSmall, Theme.TextMuted);
+            _lblDockerSide.Location = new Point(6, 6);
 
-            _lblDriveSide = new Label();
-            _lblDriveSide.Text = "Google Drive: Verificando...";
-            _lblDriveSide.Font = Theme.FontSmall;
-            _lblDriveSide.ForeColor = Theme.TextMuted;
-            _lblDriveSide.Location = new Point(6, 36);
-            _lblDriveSide.AutoSize = true;
+            _lblDriveSide = Theme.CreateLabel("Google Drive: Verificando...", Theme.FontSmall, Theme.TextMuted);
+            _lblDriveSide.Location = new Point(6, 28);
 
-            Label lblAppVer = new Label();
-            lblAppVer.Text = "Aplicativo Nativo v2.0";
-            lblAppVer.Font = Theme.FontSmall;
-            lblAppVer.ForeColor = Theme.TextDim;
-            lblAppVer.Location = new Point(6, 62);
-            lblAppVer.AutoSize = true;
+            Label lblAppVer = Theme.CreateLabel("Aplicativo Nativo v2.0", Theme.FontSmall, Theme.TextDim);
+            lblAppVer.Location = new Point(6, 52);
+
+            Button btnExitSide = Theme.CreateButton("Sair do App", Theme.BgElevated, Theme.TextMuted);
+            btnExitSide.Size = new Size(194, 32);
+            btnExitSide.Location = new Point(2, 82);
+            btnExitSide.Font = Theme.FontSmall;
+            btnExitSide.Click += delegate { ExitApplication(); };
 
             sideFooter.Controls.Add(_lblDockerSide);
             sideFooter.Controls.Add(_lblDriveSide);
             sideFooter.Controls.Add(lblAppVer);
+            sideFooter.Controls.Add(btnExitSide);
             _sidebarPanel.Controls.Add(sideFooter);
 
-            // Top Header
+            // Top Header (Simple Panel with explicit Padding keeps pills vertically centered and unclipped)
             Panel topBar = new Panel();
             topBar.Dock = DockStyle.Top;
-            topBar.Height = 64;
+            topBar.Height = 68;
             topBar.BackColor = Theme.BgSidebar;
+            topBar.Padding = new Padding(14, 16, 14, 16);
             topBar.Paint += delegate(object s, PaintEventArgs e)
             {
                 e.Graphics.DrawLine(new Pen(Theme.Border), 0, topBar.Height - 1, topBar.Width, topBar.Height - 1);
             };
 
+            Panel statusPanel = new Panel();
+            statusPanel.Dock = DockStyle.Fill;
+
             _statusDot = new Panel();
             _statusDot.Size = new Size(12, 12);
-            _statusDot.Location = new Point(20, 26);
+            _statusDot.Location = new Point(4, 12);
             _statusDot.BackColor = Theme.Rose;
 
-            _lblHeaderStatus = new Label();
-            _lblHeaderStatus.Text = "Checando infraestrutura...";
-            _lblHeaderStatus.Font = Theme.FontBold;
-            _lblHeaderStatus.ForeColor = Theme.TextPrimary;
-            _lblHeaderStatus.Location = new Point(40, 14);
-            _lblHeaderStatus.AutoSize = true;
+            _lblHeaderStatus = Theme.CreateLabel("Checando infraestrutura...", Theme.FontBold, Theme.TextPrimary);
+            _lblHeaderStatus.Location = new Point(24, 0);
 
-            _lblHeaderSub = new Label();
-            _lblHeaderSub.Text = "Aguardando Docker e Google Drive";
-            _lblHeaderSub.Font = Theme.FontSmall;
-            _lblHeaderSub.ForeColor = Theme.TextMuted;
-            _lblHeaderSub.Location = new Point(40, 34);
-            _lblHeaderSub.AutoSize = true;
+            _lblHeaderSub = Theme.CreateLabel("Aguardando Docker e Google Drive", Theme.FontSmall, Theme.TextMuted);
+            _lblHeaderSub.Location = new Point(24, 19);
+
+            statusPanel.Controls.Add(_statusDot);
+            statusPanel.Controls.Add(_lblHeaderStatus);
+            statusPanel.Controls.Add(_lblHeaderSub);
 
             FlowLayoutPanel pillsFlow = new FlowLayoutPanel();
             pillsFlow.Dock = DockStyle.Right;
-            pillsFlow.Width = 560;
-            pillsFlow.FlowDirection = FlowDirection.RightToLeft;
-            pillsFlow.Padding = new Padding(0, 14, 14, 0);
+            pillsFlow.AutoSize = true;
+            pillsFlow.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            pillsFlow.FlowDirection = FlowDirection.LeftToRight;
             pillsFlow.WrapContents = false;
-
-            Button btnRefreshTop = Theme.CreateButton("Atualizar", Theme.BgElevated, Theme.TextPrimary);
-            btnRefreshTop.Size = new Size(86, 32);
-            btnRefreshTop.Click += async delegate { await RefreshAllAsync(true); };
-
-            _btnSoundToggle = Theme.CreateButton("Som: ON", Theme.BgElevated, Theme.Emerald);
-            _btnSoundToggle.Size = new Size(80, 32);
-            _btnSoundToggle.Click += delegate
-            {
-                _soundEnabled = !_soundEnabled;
-                _btnSoundToggle.Text = _soundEnabled ? "Som: ON" : "Som: OFF";
-                _btnSoundToggle.ForeColor = _soundEnabled ? Theme.Emerald : Theme.TextMuted;
-            };
-
-            _lblLockPill = CreatePillLabel("Trava: —", 130);
-            _lblResourcesPill = CreatePillLabel("CPU/RAM: —", 135);
+            pillsFlow.Margin = new Padding(0);
+            pillsFlow.Padding = new Padding(0);
 
             _btnPlayitPill = Theme.CreateButton("Playit: Offline", Theme.BgElevated, Theme.Cyan);
-            _btnPlayitPill.Size = new Size(165, 32);
+            _btnPlayitPill.Size = new Size(148, 32);
             _btnPlayitPill.Font = Theme.FontSmall;
+            _btnPlayitPill.Margin = new Padding(4, 0, 4, 0);
             _btnPlayitPill.Click += delegate
             {
                 if (!string.IsNullOrEmpty(_currentPlayitAddress))
@@ -289,22 +384,40 @@ namespace MineSyncApp.UI
                 }
             };
 
-            pillsFlow.Controls.Add(btnRefreshTop);
-            pillsFlow.Controls.Add(_btnSoundToggle);
-            pillsFlow.Controls.Add(_lblLockPill);
-            pillsFlow.Controls.Add(_lblResourcesPill);
-            pillsFlow.Controls.Add(_btnPlayitPill);
+            _lblResourcesPill = CreatePillLabel("CPU/RAM: —", 125);
+            _lblLockPill = CreatePillLabel("Trava: —", 120);
 
-            topBar.Controls.Add(_statusDot);
-            topBar.Controls.Add(_lblHeaderStatus);
-            topBar.Controls.Add(_lblHeaderSub);
+            _btnSoundToggle = Theme.CreateButton("Som: ON", Theme.BgElevated, Theme.Emerald);
+            _btnSoundToggle.Size = new Size(74, 32);
+            _btnSoundToggle.Font = Theme.FontSmall;
+            _btnSoundToggle.Margin = new Padding(4, 0, 4, 0);
+            _btnSoundToggle.Click += delegate
+            {
+                _soundEnabled = !_soundEnabled;
+                _btnSoundToggle.Text = _soundEnabled ? "Som: ON" : "Som: OFF";
+                _btnSoundToggle.ForeColor = _soundEnabled ? Theme.Emerald : Theme.TextMuted;
+            };
+
+            Button btnRefreshTop = Theme.CreateButton("Atualizar", Theme.BgElevated, Theme.TextPrimary);
+            btnRefreshTop.Size = new Size(80, 32);
+            btnRefreshTop.Font = Theme.FontSmall;
+            btnRefreshTop.Margin = new Padding(4, 0, 0, 0);
+            btnRefreshTop.Click += async delegate { await RefreshAllAsync(true); };
+
+            pillsFlow.Controls.Add(_btnPlayitPill);
+            pillsFlow.Controls.Add(_lblResourcesPill);
+            pillsFlow.Controls.Add(_lblLockPill);
+            pillsFlow.Controls.Add(_btnSoundToggle);
+            pillsFlow.Controls.Add(btnRefreshTop);
+
+            topBar.Controls.Add(statusPanel);
             topBar.Controls.Add(pillsFlow);
 
             // Content host
             _contentHost = new Panel();
             _contentHost.Dock = DockStyle.Fill;
             _contentHost.BackColor = Theme.BgBase;
-            _contentHost.Padding = new Padding(16);
+            _contentHost.Padding = new Padding(14);
 
             _tabDashboard = BuildDashboardTab();
             _tabConsole = BuildConsoleTab();
@@ -318,6 +431,7 @@ namespace MineSyncApp.UI
             _contentHost.Controls.Add(_tabBackups);
             _contentHost.Controls.Add(_tabConfig);
 
+            // Correct docking order: Fill added first, then Top/Left added after
             this.Controls.Add(_contentHost);
             this.Controls.Add(topBar);
             this.Controls.Add(_sidebarPanel);
@@ -327,9 +441,10 @@ namespace MineSyncApp.UI
         {
             Button btn = new Button();
             btn.Text = "  " + label;
+            btn.UseMnemonic = false;
             btn.TextAlign = ContentAlignment.MiddleLeft;
             btn.Location = new Point(12, top);
-            btn.Size = new Size(200, 38);
+            btn.Size = new Size(196, 38);
             btn.FlatStyle = FlatStyle.Flat;
             btn.FlatAppearance.BorderSize = 0;
             btn.Font = Theme.FontBold;
@@ -343,8 +458,10 @@ namespace MineSyncApp.UI
         {
             Label lbl = new Label();
             lbl.Text = text;
+            lbl.UseMnemonic = false;
             lbl.AutoSize = false;
             lbl.Size = new Size(width, 32);
+            lbl.Margin = new Padding(4, 0, 4, 0);
             lbl.TextAlign = ContentAlignment.MiddleCenter;
             lbl.BackColor = Theme.BgElevated;
             lbl.ForeColor = Theme.TextMuted;
@@ -377,36 +494,58 @@ namespace MineSyncApp.UI
 
         private Panel BuildDashboardTab()
         {
-            Panel root = new Panel();
+            TableLayoutPanel root = new TableLayoutPanel();
             root.Dock = DockStyle.Fill;
+            root.ColumnCount = 1;
+            root.RowCount = 2;
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 264f));
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
             TableLayoutPanel topGrid = new TableLayoutPanel();
-            topGrid.Dock = DockStyle.Top;
-            topGrid.Height = 270;
+            topGrid.Dock = DockStyle.Fill;
             topGrid.ColumnCount = 2;
             topGrid.RowCount = 1;
-            topGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 54f));
-            topGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 46f));
+            topGrid.Margin = new Padding(0, 0, 0, 10);
+            topGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 52f));
+            topGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 48f));
 
             // Left Card: Controls & Progress
-            Panel heroCard = Theme.CreateCard("Controle do Servidor", "Gerencie Docker, Playit.gg e sincronização em um clique");
+            CardPanel heroCard = new CardPanel();
             heroCard.Dock = DockStyle.Fill;
-            heroCard.Margin = new Padding(0, 0, 10, 10);
+            heroCard.Margin = new Padding(0, 0, 8, 0);
+
+            TableLayoutPanel heroLayout = new TableLayoutPanel();
+            heroLayout.Dock = DockStyle.Fill;
+            heroLayout.ColumnCount = 1;
+            heroLayout.RowCount = 4;
+            heroLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 54f));
+            heroLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            heroLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));
+            heroLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 18f));
+
+            TableLayoutPanel btnGrid = new TableLayoutPanel();
+            btnGrid.Dock = DockStyle.Fill;
+            btnGrid.ColumnCount = 2;
+            btnGrid.RowCount = 2;
+            btnGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+            btnGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+            btnGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 50f));
+            btnGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 50f));
 
             _btnStart = Theme.CreateButton("▶  Iniciar Servidor", Theme.EmeraldDark, Color.White);
-            _btnStart.Size = new Size(215, 44);
-            _btnStart.Location = new Point(14, 66);
+            _btnStart.Dock = DockStyle.Fill;
+            _btnStart.Margin = new Padding(0, 0, 5, 5);
             _btnStart.Click += async delegate { await RunStartWorkflowAsync(); };
 
             _btnStop = Theme.CreateButton("⏹  Parar e Salvar", Theme.Rose, Color.White);
-            _btnStop.Size = new Size(215, 44);
-            _btnStop.Location = new Point(240, 66);
+            _btnStop.Dock = DockStyle.Fill;
+            _btnStop.Margin = new Padding(5, 0, 0, 5);
             _btnStop.Enabled = false;
             _btnStop.Click += async delegate { await RunWorkflowWithHandling(_engine.StopAndSaveServerAsync()); };
 
             _btnEmergency = Theme.CreateButton("⚠  Salvar Emergência", Theme.Amber, Color.White);
-            _btnEmergency.Size = new Size(215, 44);
-            _btnEmergency.Location = new Point(14, 120);
+            _btnEmergency.Dock = DockStyle.Fill;
+            _btnEmergency.Margin = new Padding(0, 5, 5, 0);
             _btnEmergency.Click += async delegate
             {
                 DialogResult res = MessageBox.Show(
@@ -419,8 +558,8 @@ namespace MineSyncApp.UI
             };
 
             _btnKill = Theme.CreateButton("☠  Fechar Sem Salvar", Theme.Crimson, Color.White);
-            _btnKill.Size = new Size(215, 44);
-            _btnKill.Location = new Point(240, 120);
+            _btnKill.Dock = DockStyle.Fill;
+            _btnKill.Margin = new Padding(5, 5, 0, 0);
             _btnKill.Enabled = false;
             _btnKill.Click += async delegate
             {
@@ -433,172 +572,253 @@ namespace MineSyncApp.UI
                 if (res == DialogResult.Yes) await RunWorkflowWithHandling(_engine.ForceKillAsync());
             };
 
-            _lblWorkflowStep = new Label();
-            _lblWorkflowStep.Text = "Aguardando comando...";
-            _lblWorkflowStep.Font = Theme.FontSmall;
-            _lblWorkflowStep.ForeColor = Theme.TextMuted;
-            _lblWorkflowStep.Location = new Point(14, 184);
-            _lblWorkflowStep.Size = new Size(445, 20);
+            btnGrid.Controls.Add(_btnStart, 0, 0);
+            btnGrid.Controls.Add(_btnStop, 1, 0);
+            btnGrid.Controls.Add(_btnEmergency, 0, 1);
+            btnGrid.Controls.Add(_btnKill, 1, 1);
+
+            _lblWorkflowStep = Theme.CreateLabel("Aguardando comando...", Theme.FontSmall, Theme.TextMuted);
+            _lblWorkflowStep.AutoSize = false;
+            _lblWorkflowStep.Dock = DockStyle.Fill;
+            _lblWorkflowStep.TextAlign = ContentAlignment.BottomLeft;
 
             _workflowProgress = new ProgressBar();
-            _workflowProgress.Location = new Point(14, 208);
-            _workflowProgress.Size = new Size(445, 16);
+            _workflowProgress.Dock = DockStyle.Fill;
             _workflowProgress.Maximum = 100;
 
-            heroCard.Controls.Add(_btnStart);
-            heroCard.Controls.Add(_btnStop);
-            heroCard.Controls.Add(_btnEmergency);
-            heroCard.Controls.Add(_btnKill);
-            heroCard.Controls.Add(_lblWorkflowStep);
-            heroCard.Controls.Add(_workflowProgress);
+            heroLayout.Controls.Add(Theme.CreateCardHeader("Controle do Servidor", "Gerencie Docker, Playit.gg e sincronização em um clique", null), 0, 0);
+            heroLayout.Controls.Add(btnGrid, 0, 1);
+            heroLayout.Controls.Add(_lblWorkflowStep, 0, 2);
+            heroLayout.Controls.Add(_workflowProgress, 0, 3);
+            heroCard.Controls.Add(heroLayout);
 
             // Right Card: Cloud Sync
-            Panel cloudCard = Theme.CreateCard("Sincronização & Google Drive", "Comparação Local vs Nuvem (world/level.dat)");
+            CardPanel cloudCard = new CardPanel();
             cloudCard.Dock = DockStyle.Fill;
-            cloudCard.Margin = new Padding(10, 0, 0, 10);
+            cloudCard.Margin = new Padding(8, 0, 0, 0);
+
+            TableLayoutPanel cloudLayout = new TableLayoutPanel();
+            cloudLayout.Dock = DockStyle.Fill;
+            cloudLayout.ColumnCount = 1;
+            cloudLayout.RowCount = 3;
+            cloudLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 54f));
+            cloudLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            cloudLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 18f));
 
             Button btnCheckDrive = Theme.CreateButton("Checar Agora", Theme.BgElevated, Theme.TextPrimary);
-            btnCheckDrive.Size = new Size(105, 30);
-            btnCheckDrive.Location = new Point(290, 14);
-            btnCheckDrive.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnCheckDrive.Size = new Size(108, 30);
+            btnCheckDrive.Font = Theme.FontSmall;
             btnCheckDrive.Click += async delegate { await RefreshAllAsync(true); };
 
-            _lblLocalDate = AddInfoPair(cloudCard, "Save Local:", "—", 68);
-            _lblCloudDate = AddInfoPair(cloudCard, "Save na Nuvem:", "—", 96);
-            _lblLockOwner = AddInfoPair(cloudCard, "Trava (lock.txt):", "—", 124);
-            _lblDriveAuth = AddInfoPair(cloudCard, "Autenticação Drive:", "—", 152);
-            _lblQuotaText = AddInfoPair(cloudCard, "Espaço no Drive:", "—", 180);
+            TableLayoutPanel infoGrid = new TableLayoutPanel();
+            infoGrid.Dock = DockStyle.Fill;
+            infoGrid.ColumnCount = 2;
+            infoGrid.RowCount = 5;
+            infoGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 145f));
+            infoGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            for (int r = 0; r < 5; r++)
+            {
+                infoGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 20f));
+            }
+
+            _lblLocalDate = AddInfoRow(infoGrid, "Save Local:", "—", 0);
+            _lblCloudDate = AddInfoRow(infoGrid, "Save na Nuvem:", "—", 1);
+            _lblLockOwner = AddInfoRow(infoGrid, "Trava (lock.txt):", "—", 2);
+            _lblDriveAuth = AddInfoRow(infoGrid, "Autenticação Drive:", "—", 3);
+            _lblQuotaText = AddInfoRow(infoGrid, "Espaço no Drive:", "—", 4);
 
             _quotaBar = new ProgressBar();
-            _quotaBar.Location = new Point(14, 210);
-            _quotaBar.Size = new Size(375, 14);
-            _quotaBar.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            _quotaBar.Dock = DockStyle.Fill;
             _quotaBar.Maximum = 100;
 
-            cloudCard.Controls.Add(btnCheckDrive);
-            cloudCard.Controls.Add(_quotaBar);
+            cloudLayout.Controls.Add(Theme.CreateCardHeader("Sincronização & Google Drive", "Comparação Local vs Nuvem (world/level.dat)", btnCheckDrive), 0, 0);
+            cloudLayout.Controls.Add(infoGrid, 0, 1);
+            cloudLayout.Controls.Add(_quotaBar, 0, 2);
+            cloudCard.Controls.Add(cloudLayout);
 
             topGrid.Controls.Add(heroCard, 0, 0);
             topGrid.Controls.Add(cloudCard, 1, 0);
 
-            // Bottom Card: Live Terminal + Quick RCON
-            Panel logCard = Theme.CreateCard("Terminal Ao Vivo", "Logs de execução e envio rápido de comandos RCON");
+            // Bottom Card: Live Terminal + Command Bar
+            CardPanel logCard = new CardPanel();
             logCard.Dock = DockStyle.Fill;
 
+            TableLayoutPanel logLayout = new TableLayoutPanel();
+            logLayout.Dock = DockStyle.Fill;
+            logLayout.ColumnCount = 1;
+            logLayout.RowCount = 3;
+            logLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 54f));
+            logLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            logLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
+
+            Button btnExpandConsole = Theme.CreateButton("Abrir Console Completo", Theme.BgElevated, Theme.Cyan);
+            btnExpandConsole.Size = new Size(168, 30);
+            btnExpandConsole.Font = Theme.FontSmall;
+            btnExpandConsole.Click += delegate { SwitchTab("console"); };
+
             _rtbDashLog = new RichTextBox();
+            _rtbDashLog.Dock = DockStyle.Fill;
             _rtbDashLog.BackColor = Theme.BgInput;
             _rtbDashLog.ForeColor = Color.FromArgb(203, 213, 225);
             _rtbDashLog.Font = Theme.FontMono;
             _rtbDashLog.BorderStyle = BorderStyle.FixedSingle;
             _rtbDashLog.ReadOnly = true;
-            _rtbDashLog.Location = new Point(14, 62);
-            _rtbDashLog.Size = new Size(920, 270);
-            _rtbDashLog.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
-
-            Panel rconBar = new Panel();
-            rconBar.Height = 38;
-            rconBar.Dock = DockStyle.Bottom;
 
             _txtDashRcon = Theme.CreateTextBox(false);
-            _txtDashRcon.Font = Theme.FontMono;
-            _txtDashRcon.Location = new Point(0, 4);
-            _txtDashRcon.Size = new Size(800, 30);
-            _txtDashRcon.Anchor = AnchorStyles.Left | AnchorStyles.Right;
-            _txtDashRcon.KeyDown += async delegate(object s, KeyEventArgs e)
-            {
-                if (e.KeyCode == Keys.Enter)
+            Panel dashCmdBar = BuildCommandBar(
+                _txtDashRcon,
+                "Digite um comando do servidor (ex: /op nick, /gamemode creative nick, /time set day, /say ola)...",
+                async delegate
                 {
-                    e.SuppressKeyPress = true;
                     string cmd = _txtDashRcon.Text.Trim();
                     _txtDashRcon.Text = "";
                     await ExecuteRconFromUiAsync(cmd);
                 }
-            };
+            );
 
-            Button btnSendDashRcon = Theme.CreateButton("Enviar RCON", Theme.EmeraldDark, Color.White);
-            btnSendDashRcon.Size = new Size(115, 30);
-            btnSendDashRcon.Location = new Point(808, 3);
-            btnSendDashRcon.Anchor = AnchorStyles.Right;
-            btnSendDashRcon.Click += async delegate
-            {
-                string cmd = _txtDashRcon.Text.Trim();
-                _txtDashRcon.Text = "";
-                await ExecuteRconFromUiAsync(cmd);
-            };
+            logLayout.Controls.Add(Theme.CreateCardHeader("Terminal Ao Vivo & Comandos", "Logs em tempo real e envio de comandos como /op nick", btnExpandConsole), 0, 0);
+            logLayout.Controls.Add(_rtbDashLog, 0, 1);
+            logLayout.Controls.Add(dashCmdBar, 0, 2);
+            logCard.Controls.Add(logLayout);
 
-            rconBar.Controls.Add(_txtDashRcon);
-            rconBar.Controls.Add(btnSendDashRcon);
-
-            logCard.Controls.Add(_rtbDashLog);
-            logCard.Controls.Add(rconBar);
-
-            root.Controls.Add(logCard);
-            root.Controls.Add(topGrid);
+            root.Controls.Add(topGrid, 0, 0);
+            root.Controls.Add(logCard, 0, 1);
             return root;
         }
 
-        private static Label AddInfoPair(Panel parent, string labelText, string initialVal, int y)
+        private Panel BuildCommandBar(TextBox inputBox, string placeholder, Func<Task> onSendAsync)
         {
-            Label lblKey = new Label();
-            lblKey.Text = labelText;
-            lblKey.ForeColor = Theme.TextMuted;
-            lblKey.Font = Theme.FontBase;
-            lblKey.Location = new Point(14, y);
-            lblKey.AutoSize = true;
+            TableLayoutPanel bar = new TableLayoutPanel();
+            bar.Dock = DockStyle.Fill;
+            bar.ColumnCount = 3;
+            bar.RowCount = 1;
+            bar.Margin = new Padding(0);
+            bar.Padding = new Padding(0, 4, 0, 0);
+            bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            bar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 146f));
+            bar.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
-            Label lblVal = new Label();
-            lblVal.Text = initialVal;
-            lblVal.ForeColor = Theme.TextPrimary;
-            lblVal.Font = Theme.FontBold;
-            lblVal.Location = new Point(155, y);
-            lblVal.Size = new Size(240, 20);
-            lblVal.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            Label lblPrompt = Theme.CreateLabel("Comando /:", Theme.FontBold, Theme.Emerald);
+            lblPrompt.Anchor = AnchorStyles.Left;
+            lblPrompt.Margin = new Padding(0, 0, 8, 0);
 
-            parent.Controls.Add(lblKey);
-            parent.Controls.Add(lblVal);
+            inputBox.Dock = DockStyle.Fill;
+            inputBox.Font = Theme.FontMono;
+            inputBox.Margin = new Padding(0, 4, 8, 4);
+            Theme.SetPlaceholder(inputBox, placeholder);
+            inputBox.KeyDown += async delegate(object s, KeyEventArgs e)
+            {
+                if (e.KeyCode == Keys.Enter)
+                {
+                    e.SuppressKeyPress = true;
+                    await onSendAsync();
+                }
+                else if (e.KeyCode == Keys.Up && _rconHistoryIdx + 1 < _rconHistory.Count)
+                {
+                    _rconHistoryIdx++;
+                    inputBox.Text = _rconHistory[_rconHistoryIdx];
+                    inputBox.SelectionStart = inputBox.Text.Length;
+                    e.SuppressKeyPress = true;
+                }
+                else if (e.KeyCode == Keys.Down)
+                {
+                    if (_rconHistoryIdx > 0)
+                    {
+                        _rconHistoryIdx--;
+                        inputBox.Text = _rconHistory[_rconHistoryIdx];
+                    }
+                    else
+                    {
+                        _rconHistoryIdx = -1;
+                        inputBox.Text = "";
+                    }
+                    e.SuppressKeyPress = true;
+                }
+            };
+
+            Button btnSend = Theme.CreateButton("Enviar Comando", Theme.EmeraldDark, Color.White);
+            btnSend.Dock = DockStyle.Fill;
+            btnSend.Margin = new Padding(0);
+            btnSend.Height = 32;
+            btnSend.Click += async delegate { await onSendAsync(); };
+
+            bar.Controls.Add(lblPrompt, 0, 0);
+            bar.Controls.Add(inputBox, 1, 0);
+            bar.Controls.Add(btnSend, 2, 0);
+            return bar;
+        }
+
+        private static Label AddInfoRow(TableLayoutPanel grid, string keyText, string initialVal, int row)
+        {
+            Label lblKey = Theme.CreateLabel(keyText, Theme.FontBase, Theme.TextMuted);
+            lblKey.Anchor = AnchorStyles.Left;
+
+            Label lblVal = Theme.CreateLabel(initialVal, Theme.FontBold, Theme.TextPrimary);
+            lblVal.AutoSize = false;
+            lblVal.Dock = DockStyle.Fill;
+            lblVal.TextAlign = ContentAlignment.MiddleLeft;
+
+            grid.Controls.Add(lblKey, 0, row);
+            grid.Controls.Add(lblVal, 1, row);
             return lblVal;
         }
 
         private Panel BuildConsoleTab()
         {
-            Panel card = Theme.CreateCard("Console Completo & RCON", "Visualize logs do Minecraft ou Playit.gg e execute comandos administrativos");
+            CardPanel card = new CardPanel();
             card.Dock = DockStyle.Fill;
 
-            Panel toolbar = new Panel();
-            toolbar.Location = new Point(14, 60);
-            toolbar.Size = new Size(920, 74);
-            toolbar.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            TableLayoutPanel layout = new TableLayoutPanel();
+            layout.Dock = DockStyle.Fill;
+            layout.ColumnCount = 1;
+            layout.RowCount = 4;
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 54f));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 86f));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
+
+            FlowLayoutPanel filterRow = new FlowLayoutPanel();
+            filterRow.Dock = DockStyle.Top;
+            filterRow.Height = 40;
+            filterRow.WrapContents = false;
 
             _cbLogSource = Theme.CreateComboBox();
             _cbLogSource.Items.AddRange(new object[] { "Servidor Minecraft (mc_server)", "Túnel Playit.gg (mc_playit)" });
             _cbLogSource.SelectedIndex = 0;
-            _cbLogSource.Location = new Point(0, 4);
-            _cbLogSource.Size = new Size(230, 28);
+            _cbLogSource.Width = 225;
+            _cbLogSource.Margin = new Padding(0, 4, 8, 0);
             _cbLogSource.SelectedIndexChanged += async delegate { await RefreshLogsTabAsync(); };
 
             _txtLogFilter = Theme.CreateTextBox(false);
-            _txtLogFilter.Location = new Point(242, 4);
-            _txtLogFilter.Size = new Size(220, 28);
+            _txtLogFilter.Width = 210;
+            _txtLogFilter.Margin = new Padding(0, 4, 8, 0);
+            Theme.SetPlaceholder(_txtLogFilter, "Filtrar logs...");
             _txtLogFilter.TextChanged += async delegate { await RefreshLogsTabAsync(); };
 
             _chkAutoScroll = new CheckBox();
             _chkAutoScroll.Text = "Auto-scroll";
             _chkAutoScroll.Checked = true;
             _chkAutoScroll.ForeColor = Theme.TextMuted;
-            _chkAutoScroll.Location = new Point(474, 7);
             _chkAutoScroll.AutoSize = true;
+            _chkAutoScroll.Margin = new Padding(4, 8, 10, 0);
 
             Button btnRefreshLogs = Theme.CreateButton("Atualizar Logs", Theme.BgElevated, Theme.TextPrimary);
-            btnRefreshLogs.Size = new Size(120, 30);
-            btnRefreshLogs.Location = new Point(575, 2);
+            btnRefreshLogs.Size = new Size(120, 32);
+            btnRefreshLogs.Font = Theme.FontSmall;
+            btnRefreshLogs.Margin = new Padding(0, 2, 0, 0);
             btnRefreshLogs.Click += async delegate { await RefreshLogsTabAsync(); };
 
-            toolbar.Controls.Add(_cbLogSource);
-            toolbar.Controls.Add(_txtLogFilter);
-            toolbar.Controls.Add(_chkAutoScroll);
-            toolbar.Controls.Add(btnRefreshLogs);
+            filterRow.Controls.Add(_cbLogSource);
+            filterRow.Controls.Add(_txtLogFilter);
+            filterRow.Controls.Add(_chkAutoScroll);
+            filterRow.Controls.Add(btnRefreshLogs);
 
-            // Quick command buttons
+            FlowLayoutPanel quickRow = new FlowLayoutPanel();
+            quickRow.Dock = DockStyle.Bottom;
+            quickRow.Height = 40;
+            quickRow.WrapContents = true;
+
             string[][] quickCmds = new string[][]
             {
                 new string[] { "Salvar Mundo", "save-all" },
@@ -608,108 +828,73 @@ namespace MineSyncApp.UI
                 new string[] { "Chuva", "weather rain" },
                 new string[] { "Listar Jogadores", "list" }
             };
-            int qx = 0;
             foreach (string[] pair in quickCmds)
             {
                 string title = pair[0];
                 string cmd = pair[1];
                 Button qBtn = Theme.CreateButton(title, Theme.BgElevated, Theme.Emerald);
-                qBtn.Size = new Size(118, 28);
+                qBtn.Size = new Size(116, 30);
                 qBtn.Font = Theme.FontSmall;
-                qBtn.Location = new Point(qx, 42);
+                qBtn.Margin = new Padding(0, 4, 6, 0);
                 qBtn.Click += async delegate { await ExecuteRconFromUiAsync(cmd); };
-                toolbar.Controls.Add(qBtn);
-                qx += 124;
+                quickRow.Controls.Add(qBtn);
             }
 
+            Panel toolbarWrap = new Panel();
+            toolbarWrap.Dock = DockStyle.Fill;
+            toolbarWrap.Margin = new Padding(0);
+            toolbarWrap.Controls.Add(quickRow);
+            toolbarWrap.Controls.Add(filterRow);
+
             _rtbFullLog = new RichTextBox();
+            _rtbFullLog.Dock = DockStyle.Fill;
             _rtbFullLog.BackColor = Theme.BgInput;
             _rtbFullLog.ForeColor = Color.FromArgb(203, 213, 225);
             _rtbFullLog.Font = Theme.FontMono;
             _rtbFullLog.BorderStyle = BorderStyle.FixedSingle;
             _rtbFullLog.ReadOnly = true;
-            _rtbFullLog.Location = new Point(14, 140);
-            _rtbFullLog.Size = new Size(920, 440);
-            _rtbFullLog.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
-
-            Panel bottomBar = new Panel();
-            bottomBar.Dock = DockStyle.Bottom;
-            bottomBar.Height = 38;
 
             _txtFullRcon = Theme.CreateTextBox(false);
-            _txtFullRcon.Font = Theme.FontMono;
-            _txtFullRcon.Location = new Point(0, 4);
-            _txtFullRcon.Size = new Size(790, 30);
-            _txtFullRcon.Anchor = AnchorStyles.Left | AnchorStyles.Right;
-            _txtFullRcon.KeyDown += async delegate(object s, KeyEventArgs e)
-            {
-                if (e.KeyCode == Keys.Enter)
+            Panel fullCmdBar = BuildCommandBar(
+                _txtFullRcon,
+                "Digite qualquer comando (ex: /op nick, /gamemode creative nick, /tp a b, /say ola)...",
+                async delegate
                 {
-                    e.SuppressKeyPress = true;
                     string cmd = _txtFullRcon.Text.Trim();
                     _txtFullRcon.Text = "";
                     await ExecuteRconFromUiAsync(cmd);
                 }
-                else if (e.KeyCode == Keys.Up && _rconHistoryIdx + 1 < _rconHistory.Count)
-                {
-                    _rconHistoryIdx++;
-                    _txtFullRcon.Text = _rconHistory[_rconHistoryIdx];
-                    _txtFullRcon.SelectionStart = _txtFullRcon.Text.Length;
-                    e.SuppressKeyPress = true;
-                }
-                else if (e.KeyCode == Keys.Down)
-                {
-                    if (_rconHistoryIdx > 0)
-                    {
-                        _rconHistoryIdx--;
-                        _txtFullRcon.Text = _rconHistory[_rconHistoryIdx];
-                    }
-                    else
-                    {
-                        _rconHistoryIdx = -1;
-                        _txtFullRcon.Text = "";
-                    }
-                    e.SuppressKeyPress = true;
-                }
-            };
+            );
 
-            Button btnExecRcon = Theme.CreateButton("Executar RCON", Theme.EmeraldDark, Color.White);
-            btnExecRcon.Size = new Size(125, 30);
-            btnExecRcon.Location = new Point(798, 3);
-            btnExecRcon.Anchor = AnchorStyles.Right;
-            btnExecRcon.Click += async delegate
-            {
-                string cmd = _txtFullRcon.Text.Trim();
-                _txtFullRcon.Text = "";
-                await ExecuteRconFromUiAsync(cmd);
-            };
-
-            bottomBar.Controls.Add(_txtFullRcon);
-            bottomBar.Controls.Add(btnExecRcon);
-
-            card.Controls.Add(toolbar);
-            card.Controls.Add(_rtbFullLog);
-            card.Controls.Add(bottomBar);
+            layout.Controls.Add(Theme.CreateCardHeader("Console Completo & RCON", "Visualize logs do Minecraft ou Playit.gg e envie comandos (com ou sem /)", null), 0, 0);
+            layout.Controls.Add(toolbarWrap, 0, 1);
+            layout.Controls.Add(_rtbFullLog, 0, 2);
+            layout.Controls.Add(fullCmdBar, 0, 3);
+            card.Controls.Add(layout);
             return card;
         }
 
         private Panel BuildPlayersTab()
         {
-            Panel card = Theme.CreateCard("Jogadores & Estatísticas do Mundo", "Dados reais lidos de usercache, ops, whitelist e world/players/stats");
+            CardPanel card = new CardPanel();
             card.Dock = DockStyle.Fill;
 
-            _lblPlayersSummary = new Label();
-            _lblPlayersSummary.Text = "Carregando...";
-            _lblPlayersSummary.ForeColor = Theme.TextMuted;
-            _lblPlayersSummary.Location = new Point(14, 62);
-            _lblPlayersSummary.AutoSize = true;
+            TableLayoutPanel layout = new TableLayoutPanel();
+            layout.Dock = DockStyle.Fill;
+            layout.ColumnCount = 1;
+            layout.RowCount = 4;
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 54f));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 26f));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48f));
+
+            _lblPlayersSummary = Theme.CreateLabel("Carregando...", Theme.FontBase, Theme.TextMuted);
+            _lblPlayersSummary.Dock = DockStyle.Fill;
 
             _gridPlayers = new DataGridView();
             Theme.StyleDataGrid(_gridPlayers);
-            _gridPlayers.Location = new Point(14, 90);
-            _gridPlayers.Size = new Size(920, 480);
-            _gridPlayers.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
-
+            _gridPlayers.Dock = DockStyle.Fill;
+            _gridPlayers.Margin = new Padding(0, 2, 0, 6);
             _gridPlayers.Columns.Add("Name", "Jogador");
             _gridPlayers.Columns.Add("Status", "Status");
             _gridPlayers.Columns.Add("Role", "OP");
@@ -720,13 +905,15 @@ namespace MineSyncApp.UI
             _gridPlayers.Columns.Add("BlocksMined", "Blocos Minerados");
             _gridPlayers.Columns.Add("DistanceKm", "Distância");
 
-            Panel actionBar = new Panel();
-            actionBar.Dock = DockStyle.Bottom;
-            actionBar.Height = 44;
+            FlowLayoutPanel actionBar = new FlowLayoutPanel();
+            actionBar.Dock = DockStyle.Fill;
+            actionBar.Margin = new Padding(0);
+            actionBar.Padding = new Padding(0, 6, 0, 0);
+            actionBar.WrapContents = false;
 
             Button btnOp = Theme.CreateButton("Alternar OP", Theme.BgElevated, Theme.Emerald);
-            btnOp.Size = new Size(120, 34);
-            btnOp.Location = new Point(0, 4);
+            btnOp.Size = new Size(118, 34);
+            btnOp.Margin = new Padding(0, 0, 6, 0);
             btnOp.Click += async delegate
             {
                 PlayerInfo p = GetSelectedPlayer();
@@ -735,8 +922,8 @@ namespace MineSyncApp.UI
             };
 
             Button btnWl = Theme.CreateButton("Alternar Whitelist", Theme.BgElevated, Theme.Cyan);
-            btnWl.Size = new Size(145, 34);
-            btnWl.Location = new Point(128, 4);
+            btnWl.Size = new Size(142, 34);
+            btnWl.Margin = new Padding(0, 0, 8, 0);
             btnWl.Click += async delegate
             {
                 PlayerInfo p = GetSelectedPlayer();
@@ -747,12 +934,12 @@ namespace MineSyncApp.UI
             _cbGamemodeSelect = Theme.CreateComboBox();
             _cbGamemodeSelect.Items.AddRange(new object[] { "survival", "creative", "spectator", "adventure" });
             _cbGamemodeSelect.SelectedIndex = 0;
-            _cbGamemodeSelect.Location = new Point(282, 7);
-            _cbGamemodeSelect.Size = new Size(115, 28);
+            _cbGamemodeSelect.Width = 112;
+            _cbGamemodeSelect.Margin = new Padding(0, 4, 6, 0);
 
             Button btnGm = Theme.CreateButton("Aplicar Gamemode", Theme.BgElevated, Theme.TextPrimary);
-            btnGm.Size = new Size(140, 34);
-            btnGm.Location = new Point(404, 4);
+            btnGm.Size = new Size(138, 34);
+            btnGm.Margin = new Padding(0, 0, 6, 0);
             btnGm.Click += async delegate
             {
                 PlayerInfo p = GetSelectedPlayer();
@@ -761,8 +948,8 @@ namespace MineSyncApp.UI
             };
 
             Button btnKick = Theme.CreateButton("Expulsar (Kick)", Theme.Rose, Color.White);
-            btnKick.Size = new Size(130, 34);
-            btnKick.Location = new Point(552, 4);
+            btnKick.Size = new Size(125, 34);
+            btnKick.Margin = new Padding(0, 0, 6, 0);
             btnKick.Click += async delegate
             {
                 PlayerInfo p = GetSelectedPlayer();
@@ -771,8 +958,7 @@ namespace MineSyncApp.UI
             };
 
             Button btnRefreshP = Theme.CreateButton("Atualizar", Theme.BgElevated, Theme.TextPrimary);
-            btnRefreshP.Size = new Size(105, 34);
-            btnRefreshP.Location = new Point(692, 4);
+            btnRefreshP.Size = new Size(96, 34);
             btnRefreshP.Click += async delegate { await RefreshPlayersTabAsync(); };
 
             actionBar.Controls.Add(btnOp);
@@ -782,34 +968,53 @@ namespace MineSyncApp.UI
             actionBar.Controls.Add(btnKick);
             actionBar.Controls.Add(btnRefreshP);
 
-            card.Controls.Add(_lblPlayersSummary);
-            card.Controls.Add(_gridPlayers);
-            card.Controls.Add(actionBar);
+            layout.Controls.Add(Theme.CreateCardHeader("Jogadores & Estatísticas do Mundo", "Dados reais lidos de usercache, ops, whitelist e world/players/stats", null), 0, 0);
+            layout.Controls.Add(_lblPlayersSummary, 0, 1);
+            layout.Controls.Add(_gridPlayers, 0, 2);
+            layout.Controls.Add(actionBar, 0, 3);
+            card.Controls.Add(layout);
             return card;
         }
 
         private Panel BuildBackupsTab()
         {
-            Panel root = new Panel();
+            TableLayoutPanel root = new TableLayoutPanel();
             root.Dock = DockStyle.Fill;
+            root.ColumnCount = 1;
+            root.RowCount = 2;
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 142f));
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
-            Panel toolsCard = Theme.CreateCard("Ferramentas da Nuvem & Snapshots", "Manutenção de trava lock.txt, reconexão do Google Drive e backups .zip");
-            toolsCard.Dock = DockStyle.Top;
-            toolsCard.Height = 128;
+            CardPanel toolsCard = new CardPanel();
+            toolsCard.Dock = DockStyle.Fill;
+            toolsCard.Margin = new Padding(0, 0, 0, 10);
+
+            TableLayoutPanel toolsLayout = new TableLayoutPanel();
+            toolsLayout.Dock = DockStyle.Fill;
+            toolsLayout.ColumnCount = 1;
+            toolsLayout.RowCount = 2;
+            toolsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 54f));
+            toolsLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+
+            FlowLayoutPanel toolsFlow = new FlowLayoutPanel();
+            toolsFlow.Dock = DockStyle.Fill;
+            toolsFlow.Margin = new Padding(0);
+            toolsFlow.Padding = new Padding(0, 4, 0, 0);
+            toolsFlow.WrapContents = true;
 
             _btnCreateBackup = Theme.CreateButton("Criar Backup Agora (.zip)", Theme.EmeraldDark, Color.White);
-            _btnCreateBackup.Size = new Size(195, 38);
-            _btnCreateBackup.Location = new Point(14, 70);
+            _btnCreateBackup.Size = new Size(190, 36);
+            _btnCreateBackup.Margin = new Padding(0, 0, 8, 0);
             _btnCreateBackup.Click += async delegate { await CreateManualBackupAsync(); };
 
             Button btnReconnect = Theme.CreateButton("Reconectar Google Drive", Theme.BgElevated, Theme.Cyan);
-            btnReconnect.Size = new Size(185, 38);
-            btnReconnect.Location = new Point(218, 70);
+            btnReconnect.Size = new Size(180, 36);
+            btnReconnect.Margin = new Padding(0, 0, 8, 0);
             btnReconnect.Click += delegate { _engine.OpenDriveReconnectWindow(); };
 
             Button btnUnlock = Theme.CreateButton("Forçar Remoção de Trava", Theme.Amber, Color.White);
-            btnUnlock.Size = new Size(195, 38);
-            btnUnlock.Location = new Point(412, 70);
+            btnUnlock.Size = new Size(190, 36);
+            btnUnlock.Margin = new Padding(0, 0, 8, 0);
             btnUnlock.Click += async delegate
             {
                 DialogResult res = MessageBox.Show(
@@ -834,18 +1039,21 @@ namespace MineSyncApp.UI
             };
 
             Button btnOpenFolder = Theme.CreateButton("Abrir Pasta Backups", Theme.BgElevated, Theme.TextPrimary);
-            btnOpenFolder.Size = new Size(155, 38);
-            btnOpenFolder.Location = new Point(616, 70);
+            btnOpenFolder.Size = new Size(150, 36);
             btnOpenFolder.Click += delegate
             {
                 Directory.CreateDirectory(_config.BackupsDir);
                 Process.Start("explorer.exe", _config.BackupsDir);
             };
 
-            toolsCard.Controls.Add(_btnCreateBackup);
-            toolsCard.Controls.Add(btnReconnect);
-            toolsCard.Controls.Add(btnUnlock);
-            toolsCard.Controls.Add(btnOpenFolder);
+            toolsFlow.Controls.Add(_btnCreateBackup);
+            toolsFlow.Controls.Add(btnReconnect);
+            toolsFlow.Controls.Add(btnUnlock);
+            toolsFlow.Controls.Add(btnOpenFolder);
+
+            toolsLayout.Controls.Add(Theme.CreateCardHeader("Ferramentas da Nuvem & Snapshots", "Manutenção de trava lock.txt, reconexão do Google Drive e backups .zip", null), 0, 0);
+            toolsLayout.Controls.Add(toolsFlow, 0, 1);
+            toolsCard.Controls.Add(toolsLayout);
 
             TableLayoutPanel split = new TableLayoutPanel();
             split.Dock = DockStyle.Fill;
@@ -853,92 +1061,127 @@ namespace MineSyncApp.UI
             split.RowCount = 1;
             split.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55f));
             split.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45f));
-            split.Padding = new Padding(0, 12, 0, 0);
 
-            Panel localCard = Theme.CreateCard("Backups Locais (Pasta Backups/)", "Restaure ou gerencie snapshots salvos neste PC");
+            // Local backups
+            CardPanel localCard = new CardPanel();
             localCard.Dock = DockStyle.Fill;
             localCard.Margin = new Padding(0, 0, 8, 0);
 
+            TableLayoutPanel localLayout = new TableLayoutPanel();
+            localLayout.Dock = DockStyle.Fill;
+            localLayout.ColumnCount = 1;
+            localLayout.RowCount = 3;
+            localLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 54f));
+            localLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            localLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48f));
+
             _gridLocalBackups = new DataGridView();
             Theme.StyleDataGrid(_gridLocalBackups);
-            _gridLocalBackups.Location = new Point(14, 66);
-            _gridLocalBackups.Size = new Size(470, 330);
-            _gridLocalBackups.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            _gridLocalBackups.Dock = DockStyle.Fill;
+            _gridLocalBackups.Margin = new Padding(0, 2, 0, 6);
             _gridLocalBackups.Columns.Add("FileName", "Arquivo");
             _gridLocalBackups.Columns.Add("Size", "Tamanho");
             _gridLocalBackups.Columns.Add("Date", "Data");
 
-            Panel localBtns = new Panel();
-            localBtns.Dock = DockStyle.Bottom;
-            localBtns.Height = 40;
+            FlowLayoutPanel localBtns = new FlowLayoutPanel();
+            localBtns.Dock = DockStyle.Fill;
+            localBtns.Margin = new Padding(0);
+            localBtns.Padding = new Padding(0, 6, 0, 0);
 
             Button btnRestore = Theme.CreateButton("Restaurar Selecionado", Theme.Amber, Color.White);
-            btnRestore.Size = new Size(165, 34);
-            btnRestore.Location = new Point(0, 4);
+            btnRestore.Size = new Size(162, 34);
+            btnRestore.Margin = new Padding(0, 0, 6, 0);
             btnRestore.Click += async delegate { await RestoreSelectedBackupAsync(); };
 
             Button btnDelBackup = Theme.CreateButton("Excluir", Theme.Rose, Color.White);
-            btnDelBackup.Size = new Size(95, 34);
-            btnDelBackup.Location = new Point(174, 4);
+            btnDelBackup.Size = new Size(92, 34);
+            btnDelBackup.Margin = new Padding(0, 0, 6, 0);
             btnDelBackup.Click += async delegate { await DeleteSelectedBackupAsync(); };
 
             Button btnRefreshBk = Theme.CreateButton("Atualizar", Theme.BgElevated, Theme.TextPrimary);
-            btnRefreshBk.Size = new Size(95, 34);
-            btnRefreshBk.Location = new Point(278, 4);
+            btnRefreshBk.Size = new Size(92, 34);
             btnRefreshBk.Click += async delegate { await RefreshBackupsTabAsync(); };
 
             localBtns.Controls.Add(btnRestore);
             localBtns.Controls.Add(btnDelBackup);
             localBtns.Controls.Add(btnRefreshBk);
 
-            localCard.Controls.Add(_gridLocalBackups);
-            localCard.Controls.Add(localBtns);
+            localLayout.Controls.Add(Theme.CreateCardHeader("Backups Locais (Pasta Backups/)", "Restaure ou gerencie snapshots salvos neste PC", null), 0, 0);
+            localLayout.Controls.Add(_gridLocalBackups, 0, 1);
+            localLayout.Controls.Add(localBtns, 0, 2);
+            localCard.Controls.Add(localLayout);
 
-            Panel cloudCard = Theme.CreateCard("Backups na Nuvem (Drive)", "Arquivos em MinecraftSync/Backups");
+            // Cloud backups
+            CardPanel cloudCard = new CardPanel();
             cloudCard.Dock = DockStyle.Fill;
             cloudCard.Margin = new Padding(8, 0, 0, 0);
 
+            TableLayoutPanel cloudLayout = new TableLayoutPanel();
+            cloudLayout.Dock = DockStyle.Fill;
+            cloudLayout.ColumnCount = 1;
+            cloudLayout.RowCount = 2;
+            cloudLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 54f));
+            cloudLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+
             _gridCloudBackups = new DataGridView();
             Theme.StyleDataGrid(_gridCloudBackups);
-            _gridCloudBackups.Location = new Point(14, 66);
-            _gridCloudBackups.Size = new Size(380, 370);
-            _gridCloudBackups.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            _gridCloudBackups.Dock = DockStyle.Fill;
+            _gridCloudBackups.Margin = new Padding(0, 2, 0, 0);
             _gridCloudBackups.Columns.Add("FileName", "Arquivo");
             _gridCloudBackups.Columns.Add("Size", "Tamanho");
             _gridCloudBackups.Columns.Add("Date", "Data");
 
-            cloudCard.Controls.Add(_gridCloudBackups);
+            cloudLayout.Controls.Add(Theme.CreateCardHeader("Backups na Nuvem (Drive)", "Arquivos em MinecraftSync/Backups", null), 0, 0);
+            cloudLayout.Controls.Add(_gridCloudBackups, 0, 1);
+            cloudCard.Controls.Add(cloudLayout);
 
             split.Controls.Add(localCard, 0, 0);
             split.Controls.Add(cloudCard, 1, 0);
 
-            root.Controls.Add(split);
-            root.Controls.Add(toolsCard);
+            root.Controls.Add(toolsCard, 0, 0);
+            root.Controls.Add(split, 0, 1);
             return root;
         }
 
         private Panel BuildConfigTab()
         {
-            Panel card = Theme.CreateCard("Configurações do Servidor", "Edite pasta do servidor, parâmetros do Docker e propriedades de server.properties");
+            CardPanel card = new CardPanel();
             card.Dock = DockStyle.Fill;
-            card.AutoScroll = true;
+
+            TableLayoutPanel outer = new TableLayoutPanel();
+            outer.Dock = DockStyle.Fill;
+            outer.ColumnCount = 1;
+            outer.RowCount = 2;
+            outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 58f));
+            outer.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
             Button btnSaveCfg = Theme.CreateButton("Salvar Configurações", Theme.EmeraldDark, Color.White);
-            btnSaveCfg.Size = new Size(175, 36);
-            btnSaveCfg.Location = new Point(730, 14);
-            btnSaveCfg.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnSaveCfg.Size = new Size(175, 34);
             btnSaveCfg.Click += delegate { SaveConfigFields(); };
-            card.Controls.Add(btnSaveCfg);
 
-            int y = 72;
-            AddFieldLabel(card, "Pasta do Servidor (Workspace):", 14, y);
+            Panel scrollHost = new Panel();
+            scrollHost.Dock = DockStyle.Fill;
+            scrollHost.AutoScroll = true;
+
+            TableLayoutPanel formGrid = new TableLayoutPanel();
+            formGrid.Dock = DockStyle.Top;
+            formGrid.AutoSize = true;
+            formGrid.ColumnCount = 4;
+            formGrid.Padding = new Padding(0, 4, 14, 12);
+            formGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 185f));
+            formGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+            formGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 185f));
+            formGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+
+            int row = 0;
+
+            // Workspace row
             _txtWorkspacePath = Theme.CreateTextBox(true);
-            _txtWorkspacePath.Location = new Point(220, y - 3);
-            _txtWorkspacePath.Size = new Size(560, 26);
+            _txtWorkspacePath.Dock = DockStyle.Fill;
 
-            Button btnBrowseWs = Theme.CreateButton("Alterar...", Theme.BgElevated, Theme.TextPrimary);
-            btnBrowseWs.Size = new Size(95, 28);
-            btnBrowseWs.Location = new Point(790, y - 4);
+            Button btnBrowseWs = Theme.CreateButton("Alterar Pasta...", Theme.BgElevated, Theme.TextPrimary);
+            btnBrowseWs.Size = new Size(120, 28);
+            btnBrowseWs.Font = Theme.FontSmall;
             btnBrowseWs.Click += delegate
             {
                 using (FolderBrowserDialog fbd = new FolderBrowserDialog())
@@ -957,83 +1200,118 @@ namespace MineSyncApp.UI
                     }
                 }
             };
-            card.Controls.Add(_txtWorkspacePath);
-            card.Controls.Add(btnBrowseWs);
-            y += 42;
 
-            // Docker Section
-            AddSectionHeader(card, "Recursos Docker & Túnel Playit.gg", 14, y);
-            y += 30;
+            TableLayoutPanel wsPanel = new TableLayoutPanel();
+            wsPanel.Dock = DockStyle.Fill;
+            wsPanel.Margin = new Padding(0);
+            wsPanel.Height = 32;
+            wsPanel.ColumnCount = 2;
+            wsPanel.RowCount = 1;
+            wsPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            wsPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 128f));
+            wsPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            btnBrowseWs.Dock = DockStyle.Fill;
+            btnBrowseWs.Margin = new Padding(6, 0, 0, 0);
+            _txtWorkspacePath.Margin = new Padding(0, 2, 0, 2);
+            wsPanel.Controls.Add(_txtWorkspacePath, 0, 0);
+            wsPanel.Controls.Add(btnBrowseWs, 1, 0);
+
+            AddFullWidthField(formGrid, "Pasta do Servidor:", wsPanel, ref row);
+            AddSectionRow(formGrid, "Recursos Docker & Túnel Playit.gg", ref row);
 
             _cbMemory = Theme.CreateComboBox();
             _cbMemory.Items.AddRange(new object[] { "2G", "4G", "6G", "8G", "10G", "12G", "16G" });
-            AddFieldControl(card, "Memória RAM:", _cbMemory, 14, y, 220);
-
             _cbServerType = Theme.CreateComboBox();
             _cbServerType.Items.AddRange(new object[] { "VANILLA", "PAPER", "FABRIC", "FORGE" });
-            AddFieldControl(card, "Tipo de Servidor:", _cbServerType, 470, y, 220);
-            y += 38;
+            AddTwoFields(formGrid, "Memória RAM:", _cbMemory, "Tipo de Servidor:", _cbServerType, ref row);
 
             _txtServerVersion = Theme.CreateTextBox(false);
-            AddFieldControl(card, "Versão do Minecraft:", _txtServerVersion, 14, y, 220);
-
             _cbOnlineMode = Theme.CreateComboBox();
             _cbOnlineMode.Items.AddRange(new object[] { "TRUE", "FALSE" });
-            AddFieldControl(card, "Online Mode (Original):", _cbOnlineMode, 470, y, 220);
-            y += 38;
+            AddTwoFields(formGrid, "Versão do Minecraft:", _txtServerVersion, "Online Mode (Original):", _cbOnlineMode, ref row);
 
             _txtPlayitInfo = Theme.CreateTextBox(true);
-            AddFieldControl(card, "Chave Playit.toml:", _txtPlayitInfo, 14, y, 676);
-            y += 46;
+            AddFullWidthField(formGrid, "Chave Playit.toml:", _txtPlayitInfo, ref row);
 
-            // server.properties Section
-            AddSectionHeader(card, "Propriedades do Mundo (dados_mine/server.properties)", 14, y);
-            y += 30;
+            AddSectionRow(formGrid, "Propriedades do Mundo (dados_mine/server.properties)", ref row);
 
             _txtMotd = Theme.CreateTextBox(false);
-            AddFieldControl(card, "MOTD (Descrição):", _txtMotd, 14, y, 676);
-            y += 38;
+            AddFullWidthField(formGrid, "MOTD (Descrição):", _txtMotd, ref row);
 
             _cbDifficulty = Theme.CreateComboBox();
             _cbDifficulty.Items.AddRange(new object[] { "peaceful", "easy", "normal", "hard" });
-            AddFieldControl(card, "Dificuldade:", _cbDifficulty, 14, y, 220);
-
             _cbGamemode = Theme.CreateComboBox();
             _cbGamemode.Items.AddRange(new object[] { "survival", "creative", "adventure", "spectator" });
-            AddFieldControl(card, "Modo de Jogo:", _cbGamemode, 470, y, 220);
-            y += 38;
+            AddTwoFields(formGrid, "Dificuldade:", _cbDifficulty, "Modo de Jogo:", _cbGamemode, ref row);
 
             _numMaxPlayers = CreateNumeric(1, 200, 2);
-            AddFieldControl(card, "Máximo de Jogadores:", _numMaxPlayers, 14, y, 220);
-
             _numViewDist = CreateNumeric(2, 32, 16);
-            AddFieldControl(card, "View Distance (Chunks):", _numViewDist, 470, y, 220);
-            y += 38;
+            AddTwoFields(formGrid, "Máximo de Jogadores:", _numMaxPlayers, "View Distance (Chunks):", _numViewDist, ref row);
 
             _numSimDist = CreateNumeric(2, 32, 10);
-            AddFieldControl(card, "Simulation Distance:", _numSimDist, 14, y, 220);
-
             _numSpawnProt = CreateNumeric(0, 128, 16);
-            AddFieldControl(card, "Proteção do Spawn:", _numSpawnProt, 470, y, 220);
-            y += 38;
+            AddTwoFields(formGrid, "Simulation Distance:", _numSimDist, "Proteção do Spawn:", _numSpawnProt, ref row);
 
             _cbAllowFlight = Theme.CreateComboBox();
             _cbAllowFlight.Items.AddRange(new object[] { "false", "true" });
-            AddFieldControl(card, "Permitir Voo (allow-flight):", _cbAllowFlight, 14, y, 220);
-
             _cbWhitelist = Theme.CreateComboBox();
             _cbWhitelist.Items.AddRange(new object[] { "false", "true" });
-            AddFieldControl(card, "Whitelist Ativa:", _cbWhitelist, 470, y, 220);
-            y += 38;
+            AddTwoFields(formGrid, "Permitir Voo (allow-flight):", _cbAllowFlight, "Whitelist Ativa:", _cbWhitelist, ref row);
 
             _cbHardcore = Theme.CreateComboBox();
             _cbHardcore.Items.AddRange(new object[] { "false", "true" });
-            AddFieldControl(card, "Modo Hardcore:", _cbHardcore, 14, y, 220);
-
             _numRconPort = CreateNumeric(1024, 65535, 25575);
-            AddFieldControl(card, "Porta RCON:", _numRconPort, 470, y, 220);
+            AddTwoFields(formGrid, "Modo Hardcore:", _cbHardcore, "Porta RCON:", _numRconPort, ref row);
 
+            scrollHost.Controls.Add(formGrid);
+            outer.Controls.Add(Theme.CreateCardHeader("Configurações do Servidor", "Edite pasta do servidor, parâmetros do Docker e propriedades de server.properties", btnSaveCfg), 0, 0);
+            outer.Controls.Add(scrollHost, 0, 1);
+            card.Controls.Add(outer);
             return card;
+        }
+
+        private static void AddSectionRow(TableLayoutPanel grid, string title, ref int row)
+        {
+            grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 34f));
+            Label lbl = Theme.CreateLabel(title, Theme.FontBold, Theme.Emerald);
+            lbl.Margin = new Padding(0, 10, 0, 4);
+            grid.Controls.Add(lbl, 0, row);
+            grid.SetColumnSpan(lbl, 4);
+            row++;
+        }
+
+        private static void AddFullWidthField(TableLayoutPanel grid, string label, Control ctrl, ref int row)
+        {
+            grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 40f));
+            Label lbl = Theme.CreateLabel(label, Theme.FontBase, Theme.TextMuted);
+            lbl.Anchor = AnchorStyles.Left;
+            ctrl.Dock = DockStyle.Fill;
+            ctrl.Margin = new Padding(0, 4, 0, 4);
+
+            grid.Controls.Add(lbl, 0, row);
+            grid.Controls.Add(ctrl, 1, row);
+            grid.SetColumnSpan(ctrl, 3);
+            row++;
+        }
+
+        private static void AddTwoFields(TableLayoutPanel grid, string l1, Control c1, string l2, Control c2, ref int row)
+        {
+            grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 40f));
+            Label lbl1 = Theme.CreateLabel(l1, Theme.FontBase, Theme.TextMuted);
+            lbl1.Anchor = AnchorStyles.Left;
+            c1.Dock = DockStyle.Fill;
+            c1.Margin = new Padding(0, 4, 16, 4);
+
+            Label lbl2 = Theme.CreateLabel(l2, Theme.FontBase, Theme.TextMuted);
+            lbl2.Anchor = AnchorStyles.Left;
+            c2.Dock = DockStyle.Fill;
+            c2.Margin = new Padding(0, 4, 0, 4);
+
+            grid.Controls.Add(lbl1, 0, row);
+            grid.Controls.Add(c1, 1, row);
+            grid.Controls.Add(lbl2, 2, row);
+            grid.Controls.Add(c2, 3, row);
+            row++;
         }
 
         private static NumericUpDown CreateNumeric(int min, int max, int val)
@@ -1046,36 +1324,6 @@ namespace MineSyncApp.UI
             num.ForeColor = Theme.TextPrimary;
             num.BorderStyle = BorderStyle.FixedSingle;
             return num;
-        }
-
-        private static void AddSectionHeader(Panel parent, string text, int x, int y)
-        {
-            Label lbl = new Label();
-            lbl.Text = text;
-            lbl.Font = Theme.FontBold;
-            lbl.ForeColor = Theme.Emerald;
-            lbl.Location = new Point(x, y);
-            lbl.AutoSize = true;
-            parent.Controls.Add(lbl);
-        }
-
-        private static void AddFieldLabel(Panel parent, string text, int x, int y)
-        {
-            Label lbl = new Label();
-            lbl.Text = text;
-            lbl.Font = Theme.FontBase;
-            lbl.ForeColor = Theme.TextMuted;
-            lbl.Location = new Point(x, y);
-            lbl.AutoSize = true;
-            parent.Controls.Add(lbl);
-        }
-
-        private static void AddFieldControl(Panel parent, string label, Control ctrl, int x, int y, int width)
-        {
-            AddFieldLabel(parent, label, x, y);
-            ctrl.Location = new Point(x + 206, y - 3);
-            ctrl.Size = new Size(width, 26);
-            parent.Controls.Add(ctrl);
         }
 
         private void Engine_OnLog(string msg, string level)
@@ -1159,6 +1407,9 @@ namespace MineSyncApp.UI
             _btnStop.Enabled = !busy && _lastDocker.McRunning;
             _btnEmergency.Enabled = !busy;
             _btnKill.Enabled = !busy && (_lastDocker.McRunning || _lastDocker.PlayitRunning);
+
+            if (_trayMenuStart != null) _trayMenuStart.Enabled = _btnStart.Enabled;
+            if (_trayMenuStop != null) _trayMenuStop.Enabled = _btnStop.Enabled;
         }
 
         private async Task RefreshAllAsync(bool includeCloud)
@@ -1271,7 +1522,6 @@ namespace MineSyncApp.UI
 
             UpdateButtonsForBusyState(_engine.IsBusy);
 
-            // Cloud summary labels
             _lblLocalDate.Text = _lastCloud.LocalTime.HasValue ? _lastCloud.LocalTime.Value.ToString("dd/MM/yyyy HH:mm") : "Sem save local";
             _lblCloudDate.Text = _lastCloud.CloudTime.HasValue ? _lastCloud.CloudTime.Value.ToString("dd/MM/yyyy HH:mm") : "Sem save na nuvem";
 
@@ -1303,25 +1553,88 @@ namespace MineSyncApp.UI
             }
         }
 
-        private async Task ExecuteRconFromUiAsync(string cmd)
+        private async Task ExecuteRconFromUiAsync(string rawInput)
         {
-            if (string.IsNullOrWhiteSpace(cmd)) return;
+            string cmd = (rawInput ?? "").Trim();
+            if (string.IsNullOrEmpty(cmd)) return;
+
             _rconHistory.Insert(0, cmd);
             if (_rconHistory.Count > 30) _rconHistory.RemoveAt(30);
             _rconHistoryIdx = -1;
 
+            string normalized = cmd;
+            while (normalized.StartsWith("/"))
+            {
+                normalized = normalized.Substring(1).TrimStart();
+            }
+            if (string.IsNullOrEmpty(normalized)) return;
+
+            bool serverReady = _lastDocker.McRunning && _lastDocker.McReady;
             try
             {
-                string res = await RconClient.SendCommandAsync(_config, cmd, 4500);
-                string output = string.IsNullOrWhiteSpace(res) ? "(Comando executado sem resposta)" : res;
-                AppendDashLog("RCON > " + cmd + " => " + output, "success");
+                if (!serverReady)
+                {
+                    string offlineResult = await TryRunOfflineCommandAsync(normalized);
+                    if (offlineResult != null)
+                    {
+                        AppendDashLog(string.Format("> /{0} => {1}", normalized, offlineResult), "success");
+                        return;
+                    }
+                    throw new InvalidOperationException("O servidor Minecraft está offline. Ligue o servidor para enviar comandos ao vivo (comandos offline suportados: /op, /deop, /whitelist add, /whitelist remove).");
+                }
+
+                string res = await RconClient.SendCommandAsync(_config, normalized, 4500);
+                string output = string.IsNullOrWhiteSpace(res) ? "(Comando executado com sucesso)" : res;
+                AppendDashLog(string.Format("> /{0} => {1}", normalized, output), "success");
                 if (_activeTab == "console") await RefreshLogsTabAsync();
             }
             catch (Exception ex)
             {
-                AppendDashLog("Erro RCON: " + ex.Message, "error");
-                MessageBox.Show(ex.Message, "Erro RCON", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                AppendDashLog(string.Format("> /{0} [ERRO] {1}", normalized, ex.Message), "error");
+                MessageBox.Show(ex.Message, "Comando do Servidor", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
+        }
+
+        private async Task<string> TryRunOfflineCommandAsync(string normalizedCmd)
+        {
+            string[] parts = normalizedCmd.Split(new char[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 2) return null;
+
+            string verb = parts[0].ToLowerInvariant();
+            string action = null;
+            string targetNick = null;
+
+            if ((verb == "op" || verb == "deop") && parts.Length == 2)
+            {
+                action = verb;
+                targetNick = parts[1];
+            }
+            else if (verb == "whitelist" && parts.Length >= 3)
+            {
+                string sub = parts[1].ToLowerInvariant();
+                if (sub == "add") action = "whitelist_add";
+                else if (sub == "remove") action = "whitelist_remove";
+                targetNick = parts[2];
+            }
+
+            if (action == null || string.IsNullOrWhiteSpace(targetNick)) return null;
+
+            List<PlayerInfo> known = await _playerBackupService.GetPlayersAsync(false);
+            PlayerInfo match = known.Find(delegate(PlayerInfo p)
+            {
+                return string.Equals(p.Name, targetNick, StringComparison.OrdinalIgnoreCase);
+            });
+
+            if (match == null)
+            {
+                throw new InvalidOperationException(string.Format(
+                    "Jogador '{0}' ainda não está em usercache.json. Ligue o servidor para executar '/{1}' online.",
+                    targetNick,
+                    normalizedCmd
+                ));
+            }
+
+            return await _playerBackupService.PerformPlayerActionAsync(action, match, null, false);
         }
 
         private async Task RefreshLogsTabAsync()

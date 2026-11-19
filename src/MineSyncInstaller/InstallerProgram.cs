@@ -139,7 +139,11 @@ namespace MineSyncInstaller
             {
                 try
                 {
-                    File.Copy(installedExe, Path.Combine(serverDir, "MineSync.exe"), true);
+                    string looseExe = Path.Combine(serverDir, "MineSync.exe");
+                    if (File.Exists(looseExe))
+                    {
+                        File.Delete(looseExe);
+                    }
                 }
                 catch
                 {

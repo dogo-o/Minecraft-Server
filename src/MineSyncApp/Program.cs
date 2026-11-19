@@ -92,7 +92,7 @@ namespace MineSyncApp
                     listener.Stop();
                 });
 
-                string rconOut = RconClient.SendCommandAsync("127.0.0.1", port, "secret", "ping", 3000).GetAwaiter().GetResult();
+                string rconOut = RconClient.SendCommandAsync("127.0.0.1", port, "secret", "/ping", 3000).GetAwaiter().GetResult();
                 serverTask.Wait(2000);
 
                 StringBuilder report = new StringBuilder();

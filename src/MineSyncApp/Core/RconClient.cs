@@ -129,6 +129,16 @@ namespace MineSyncApp.Core
 
         public static async Task<string> SendCommandAsync(string host, int port, string password, string command, int timeoutMs)
         {
+            string normalizedCommand = (command ?? "").Trim();
+            while (normalizedCommand.StartsWith("/"))
+            {
+                normalizedCommand = normalizedCommand.Substring(1).TrimStart();
+            }
+            if (string.IsNullOrEmpty(normalizedCommand))
+            {
+                throw new ArgumentException("Comando vazio.");
+            }
+
             using (TcpClient client = new TcpClient())
             {
                 Task connectTask = client.ConnectAsync(host, port);
@@ -164,7 +174,7 @@ namespace MineSyncApp.Core
                         }
                     }
 
-                    byte[] cmdPacket = EncodePacket(cmdId, TypeExecCommand, command);
+                    byte[] cmdPacket = EncodePacket(cmdId, TypeExecCommand, normalizedCommand);
                     await stream.WriteAsync(cmdPacket, 0, cmdPacket.Length).ConfigureAwait(false);
 
                     StringBuilder sb = new StringBuilder();
